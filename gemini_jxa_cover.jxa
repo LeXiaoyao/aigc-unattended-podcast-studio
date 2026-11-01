@@ -1,0 +1,662 @@
+#!/usr/bin/osascript -l JavaScript
+/**
+ * Gemini 网页端封面生成 — 使用已登录的 Chrome
+ * 模式：导航到 Gemini，提交生成请求，等待图片，下载后读取 BASE64
+ */
+
+ObjC.import("stdlib");
+ObjC.import("Foundation");
+
+function run(args) {
+    const outputPath  = args[0] || "/tmp/gemini_cover_output.png";
+    const promptText  = args[1] || "";
+    const GEMINI_URL  = "https://gemini.google.com/app";
+    const outputDir   = outputPath.replace(/\/[^/]+$/, "") || "/tmp";
+    const DEEP_DOM_HELPER =
+        "function __codexAll(sel){" +
+        "  var out = [];" +
+        "  var seen = [];" +
+        "  var stack = [document];" +
+        "  while (stack.length) {" +
+        "    var root = stack.pop();" +
+        "    if (!root || seen.indexOf(root) >= 0) continue;" +
+        "    seen.push(root);" +
+        "    try {" +
+        "      if (root.querySelectorAll) {" +
+        "        Array.from(root.querySelectorAll(sel)).forEach(function(el){ out.push(el); });" +
+        "        Array.from(root.querySelectorAll('*')).forEach(function(el){ if (el.shadowRoot) stack.push(el.shadowRoot); });" +
+        "      }" +
+        "    } catch (e) {}" +
+        "  }" +
+        "  return out;" +
+        "}" +
+        "function __codexLabel(el){" +
+        "  try {" +
+        "    return String((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('data-tooltip'))) || el.title || el.innerText || el.textContent || '').toLowerCase();" +
+        "  } catch (e) { return ''; }" +
+        "}" +
+        "function __codexImageCandidates(){" +
+        "  return __codexAll('img').filter(function(img){" +
+        "    try {" +
+        "      var r = img.getBoundingClientRect();" +
+        "      var s = img.src || '';" +
+        "      return r.width > 150 && r.height > 150 && s &&" +
+        "             !s.includes('favicon') && !s.includes('icon') && !s.includes('avatar') && !s.includes('logo');" +
+        "    } catch (e) { return false; }" +
+        "  });" +
+        "}" +
+        "function __codexCanvasCandidates(){" +
+        "  return __codexAll('canvas').filter(function(canvas){" +
+        "    try {" +
+        "      var r = canvas.getBoundingClientRect();" +
+        "      return r.width > 150 && r.height > 150;" +
+        "    } catch (e) { return false; }" +
+        "  });" +
+        "}" +
+        "function __codexActionButtons(){" +
+        "  return __codexAll('button,[role=\"button\"],[aria-label],[title]');" +
+        "}";
+
+    const prompt = promptText ||
+        "请生成一张正方形（1:1比例）的科技感封面图片，纯图形，无任何文字、字母、数字或符号。";
+
+    // Shell helper — must use currentApplication()
+    const selfApp = Application.currentApplication();
+    selfApp.includeStandardAdditions = true;
+    function shell(cmd) {
+        return selfApp.doShellScript(cmd);
+    }
+
+    const forceFresh = String(shell("printenv GEMINI_FORCE_FRESH 2>/dev/null || true")).trim() === "1";
+
+    const homeDir     = shell("echo $HOME");
+    const downloadDir = homeDir + "/Downloads";
+    const candidateDirs = [downloadDir];
+    if (outputDir && candidateDirs.indexOf(outputDir) === -1) {
+        candidateDirs.push(outputDir);
+    }
+
+    // Chrome helpers
+    const chrome = Application("com.google.Chrome");
+    const systemEvents = Application("System Events");
+    chrome.activate();
+    delay(1);
+
+    const windows = chrome.windows();
+    if (!windows || windows.length === 0) {
+        throw new Error("Google Chrome 没有可用窗口，请先打开 Chrome");
+    }
+
+    function runJsOn(targetTab, source) {
+        try {
+            const result = targetTab.execute({ javascript: source });
+            if (result === undefined || result === null) return "";
+            return String(result);
+        } catch (e) {
+            return "";
+        }
+    }
+
+    let win = windows[0];
+    let tab = win.activeTab();
+
+    function runJs(source) {
+        return runJsOn(tab, source);
+    }
+
+    function acceptSaveDialog() {
+        try {
+            chrome.activate();
+            delay(0.6);
+            const chromeProcess = systemEvents.processes.byName("Google Chrome");
+            const targetWindow = chromeProcess.windows[0];
+            const targetSheet = targetWindow.sheets[0];
+            let clipboardBackup = "";
+            try {
+                clipboardBackup = String(selfApp.theClipboard() || "");
+            } catch (e) {}
+            try {
+                selfApp.setTheClipboardTo(outputDir);
+                delay(0.2);
+                systemEvents.keystroke("g", { using: ["command down", "shift down"] });
+                delay(0.6);
+                systemEvents.keystroke("v", { using: ["command down"] });
+                delay(0.4);
+                systemEvents.keyCode(36); // Go to folder
+                delay(0.8);
+            } catch (e) {}
+            let clicked = false;
+            try {
+                targetSheet.buttons.byName("保存").click();
+                clicked = true;
+            } catch (e) {}
+            if (!clicked) {
+                try {
+                    targetSheet.buttons.byName("Save").click();
+                    clicked = true;
+                } catch (e) {}
+            }
+            if (!clicked) {
+                systemEvents.keyCode(36); // Return
+                delay(0.8);
+                systemEvents.keyCode(36); // Confirm if sheet focus shifts
+            }
+            try {
+                selfApp.setTheClipboardTo(clipboardBackup);
+            } catch (e) {}
+            delay(0.8);
+        } catch (e) {}
+    }
+
+    function listImageFilesInDir(dirPath) {
+        try {
+            const out = shell(
+                "ls -t \"" + dirPath + "\"/*.png \"" + dirPath + "\"/*.jpg " +
+                "\"" + dirPath + "\"/*.jpeg \"" + dirPath + "\"/*.webp " +
+                "\"" + dirPath + "\"/Gemini_Generated_Image_* 2>/dev/null | head -30"
+            );
+            return out.split("\n").map(function(f) { return f.trim(); }).filter(function(f) { return f.length > 0; });
+        } catch (e) { return []; }
+    }
+
+    function listTrackedImages() {
+        let files = [];
+        candidateDirs.forEach(function(dirPath) {
+            listImageFilesInDir(dirPath).forEach(function(path) {
+                if (files.indexOf(path) === -1) files.push(path);
+            });
+        });
+        return files;
+    }
+
+    function fileMtime(path) {
+        try {
+            return Number(shell("stat -f %m \"" + path + "\" 2>/dev/null"));
+        } catch (e) { return 0; }
+    }
+
+    function fileSize(path) {
+        try {
+            return Number(shell("stat -f %z \"" + path + "\" 2>/dev/null"));
+        } catch (e) { return 0; }
+    }
+
+    function isImageFile(path) {
+        try {
+            const out = shell("file -b \"" + path + "\" 2>/dev/null | head -c 20");
+            return out.toLowerCase().includes("image") || out.toLowerCase().includes("png") || out.toLowerCase().includes("jpeg");
+        } catch (e) { return false; }
+    }
+
+    // Record existing images before navigation
+    const beforeFiles = listTrackedImages();
+    const beforeSnapshot = {};
+    beforeFiles.forEach(function(path) {
+        beforeSnapshot[path] = fileMtime(path);
+    });
+    const downloadStartedAt = Math.floor(Date.now() / 1000);
+
+    function detectExistingResultOn(targetTab) {
+        return runJsOn(
+            targetTab,
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var href = location.href || '';" +
+            "  var onGemini = href.includes('gemini.google.com');" +
+            "  var imgs = __codexImageCandidates();" +
+            "  var canvases = __codexCanvasCandidates();" +
+            "  var btns = __codexActionButtons();" +
+            "  var dl = btns.find(function(b){" +
+            "    var l = __codexLabel(b);" +
+            "    return l.includes('download') || l.includes('下载') || l.includes('save image') || l.includes('save') || l.includes('保存');" +
+            "  });" +
+            "  if (!onGemini) return 'NOT_GEMINI';" +
+            "  if (imgs.length) return 'IMG:' + imgs[imgs.length-1].src;" +
+            "  if (canvases.length) return 'CANVAS_READY';" +
+            "  if (dl) return 'DL_READY';" +
+            "  return 'NO_RESULT';" +
+            "})()"
+        );
+    }
+
+    function extractVisibleImageB64(targetTab) {
+        return runJsOn(
+            targetTab,
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var imgs = __codexImageCandidates();" +
+            "  if (!imgs.length) return '';" +
+            "  var img = imgs[imgs.length - 1];" +
+            "  try {" +
+            "    var canvas = document.createElement('canvas');" +
+            "    canvas.width = img.naturalWidth || img.width || 1024;" +
+            "    canvas.height = img.naturalHeight || img.height || 1024;" +
+            "    var ctx = canvas.getContext('2d');" +
+            "    ctx.drawImage(img, 0, 0);" +
+            "    var dataUrl = canvas.toDataURL('image/png');" +
+            "    return dataUrl.split(',')[1] || '';" +
+            "  } catch (e) {" +
+            "    return 'ERR:' + e.message;" +
+            "  }" +
+            "})()"
+        );
+    }
+
+    function findGeminiTab() {
+        let fallback = null;
+        for (let wi = 0; wi < windows.length; wi++) {
+            const candidateWin = windows[wi];
+            const tabs = candidateWin.tabs();
+            for (let ti = 0; ti < tabs.length; ti++) {
+                const candidateTab = tabs[ti];
+                const state = detectExistingResultOn(candidateTab);
+                if (state && state !== "NOT_GEMINI") {
+                    const hit = {
+                        window: candidateWin,
+                        tab: candidateTab,
+                        tabIndex: ti + 1,
+                        state: state,
+                    };
+                    if (state.startsWith("IMG:") || state === "DL_READY") {
+                        return hit;
+                    }
+                    if (!fallback) fallback = hit;
+                }
+            }
+        }
+        return fallback;
+    }
+
+    // Close stale blank Gemini tabs (from previous failed runs) — keep at most 1
+    function closeStaleGeminiTabs() {
+        let kept = 0;
+        for (let wi = 0; wi < windows.length; wi++) {
+            const candidateWin = windows[wi];
+            const tabs = candidateWin.tabs();
+            for (let ti = tabs.length - 1; ti >= 0; ti--) {
+                try {
+                    const url = String(tabs[ti].url() || "");
+                    if (url.includes("gemini.google.com/app")) {
+                        const state = detectExistingResultOn(tabs[ti]);
+                        if (state === "NO_RESULT") {
+                            if (kept > 0) {
+                                tabs[ti].close();
+                            } else {
+                                kept++;
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
+    }
+    closeStaleGeminiTabs();
+
+    const existingGemini = forceFresh ? null : findGeminiTab();
+    let existingState = existingGemini ? existingGemini.state : detectExistingResultOn(tab);
+    if (existingGemini) {
+        win = existingGemini.window;
+        tab = existingGemini.tab;
+        try {
+            win.activeTabIndex = existingGemini.tabIndex;
+        } catch (e) {}
+        chrome.activate();
+        delay(1);
+    }
+
+    if (forceFresh) {
+        // Reuse an existing blank Gemini tab instead of always opening a new one
+        let reuseTab = null;
+        for (let wi = 0; wi < windows.length && !reuseTab; wi++) {
+            const candidateWin = windows[wi];
+            const tabs = candidateWin.tabs();
+            for (let ti = 0; ti < tabs.length; ti++) {
+                try {
+                    const url = String(tabs[ti].url() || "");
+                    if (url.includes("gemini.google.com/app") && url.indexOf("?") === -1) {
+                        // Check if it's a fresh/idle page (no conversation)
+                        const hasResult = detectExistingResultOn(tabs[ti]);
+                        if (hasResult === "NO_RESULT") {
+                            reuseTab = tabs[ti];
+                            win = candidateWin;
+                            try { candidateWin.activeTabIndex = ti + 1; } catch (e) {}
+                            break;
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
+        if (reuseTab) {
+            tab = reuseTab;
+            tab.url = GEMINI_URL;  // Refresh the page
+        } else {
+            const freshTab = chrome.Tab({url: GEMINI_URL});
+            win.tabs.push(freshTab);
+            tab = freshTab;
+            try {
+                win.activeTabIndex = win.tabs.length;
+            } catch (e) {}
+        }
+        chrome.activate();
+        delay(6);
+        existingState = "NO_RESULT";
+    }
+
+    if (existingState === "NOT_GEMINI" || existingState === "NO_RESULT") {
+        // Navigate to Gemini
+        tab.url = GEMINI_URL;
+        delay(6);
+
+        // Wait for page load
+        for (let i = 0; i < 15; i++) {
+            const ready = runJs("document.readyState === 'complete' ? 'true' : 'false'");
+            if (ready === "true") break;
+            delay(2);
+        }
+        delay(3);
+
+        // Wait for input element
+        let inputReady = false;
+        for (let i = 0; i < 20; i++) {
+            const found = runJs(
+                "(function(){" + DEEP_DOM_HELPER +
+                "  var el = __codexAll('rich-textarea div[contenteditable], div[contenteditable][role=\"textbox\"], textarea')[0];" +
+                "  return el ? 'true' : 'false';" +
+                "})()"
+            );
+            if (found === "true") { inputReady = true; break; }
+            delay(2);
+        }
+        if (!inputReady) {
+            throw new Error("Gemini 输入框未找到，请确认 Chrome 已登录 Google 账号");
+        }
+
+        // Type prompt directly into Gemini DOM, avoid clipboard/global paste side effects
+        const injected = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var el = __codexAll('rich-textarea div[contenteditable], div[contenteditable][role=\"textbox\"], textarea')[0];" +
+            "  if (!el) return 'no-input';" +
+            "  el.focus();" +
+            "  try {" +
+            "    if (el.tagName && el.tagName.toLowerCase() === 'textarea') {" +
+            "      el.value = " + JSON.stringify(prompt) + ";" +
+            "      el.dispatchEvent(new Event('input', { bubbles: true }));" +
+            "      return 'textarea:' + el.value.length;" +
+            "    }" +
+            "    el.innerHTML = '';" +
+            "    var parts = " + JSON.stringify(prompt.split('\n')) + ";" +
+            "    parts.forEach(function(line, idx){" +
+            "      if (idx > 0) el.appendChild(document.createElement('br'));" +
+            "      el.appendChild(document.createTextNode(line));" +
+            "    });" +
+            "    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: " + JSON.stringify(prompt) + ", inputType: 'insertText' }));" +
+            "    return 'editable:' + String((el.innerText || el.textContent || '').length);" +
+            "  } catch (e) {" +
+            "    return 'err:' + e.message;" +
+            "  }" +
+            "})()"
+        );
+        delay(1);
+        const injectedLength = parseInt(String(injected || "").split(":").pop(), 10) || 0;
+        if (injectedLength < Math.max(20, Math.floor(prompt.length * 0.15))) {
+            throw new Error("Gemini 封面 prompt 未完整写入输入框");
+        }
+
+        // Click send button
+        const sent = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var btns = __codexActionButtons();" +
+            "  var btn = btns.find(function(b){" +
+            "    var l = __codexLabel(b);" +
+            "    return (l.includes('send') || l.includes('发送')) && !b.disabled;" +
+            "  });" +
+            "  if (btn) { btn.click(); return 'clicked'; }" +
+            "  var sub = __codexAll('[data-testid=\"send-button\"],button[type=\"submit\"]')[0];" +
+            "  if (sub && !sub.disabled) { sub.click(); return 'clicked'; }" +
+            "  return 'no-button';" +
+            "})()"
+        );
+
+        if (sent !== "clicked") {
+            // Fallback: press Enter
+            runJs(
+                "(function(){" + DEEP_DOM_HELPER +
+                "  var el = __codexAll('rich-textarea div[contenteditable], div[contenteditable][role=\"textbox\"], textarea')[0];" +
+                "  if (el) {" +
+                "    el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true,composed:true}));" +
+                "  }" +
+                "})()"
+            );
+        }
+    }
+
+    // Poll for result: allow longer waits for Gemini thinking + image generation.
+    // Prefer waiting until the image is visible or the download button appears.
+    let dlReady = false;
+    let imgSrc  = null;
+    let canvasReady = false;
+    let lastState = "WAIT";
+    if (existingState && existingState.startsWith("IMG:")) {
+        imgSrc = existingState.slice(4);
+    } else if (existingState === "CANVAS_READY") {
+        canvasReady = true;
+    } else if (existingState === "DL_READY") {
+        dlReady = true;
+        lastState = existingState;
+    }
+    for (let i = 0; i < 100; i++) {
+        if (imgSrc || dlReady) break;
+        delay(3);
+        const result = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var imgs = __codexImageCandidates();" +
+            "  var canvases = __codexCanvasCandidates();" +
+            "  if (imgs.length) return 'IMG:' + imgs[imgs.length-1].src;" +
+            "  if (canvases.length) return 'CANVAS_READY';" +
+            "  var btns = __codexActionButtons();" +
+            "  var dl = btns.find(function(b){" +
+            "    var l = __codexLabel(b);" +
+            "    return l.includes('download') || l.includes('下载') || l.includes('save image') || l.includes('save') || l.includes('保存');" +
+            "  });" +
+            "  if (dl) return 'DL_READY';" +
+            "  var generating = btns.find(function(b){" +
+            "    var l = __codexLabel(b);" +
+            "    return l.includes('stop') || l.includes('停止') || l.includes('cancel');" +
+            "  }) || __codexAll('[role=\"progressbar\"], mat-progress-bar, [aria-busy=\"true\"]')[0];" +
+            "  if (generating) return 'GENERATING';" +
+            "  return 'WAIT';" +
+            "})()"
+        );
+
+        if (result && result.startsWith("IMG:")) { imgSrc = result.slice(4); break; }
+        if (result === "CANVAS_READY") { canvasReady = true; break; }
+        if (result === "DL_READY") { dlReady = true; break; }
+        lastState = result || "WAIT";
+    }
+
+    const directImageB64 = extractVisibleImageB64(tab);
+    if (directImageB64 && directImageB64.length > 100 && !directImageB64.startsWith("ERR:")) {
+        return "BASE64:" + directImageB64;
+    }
+
+    if (canvasReady && !imgSrc) {
+        const canvasOnlyB64 = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var canvases = __codexCanvasCandidates();" +
+            "  if (!canvases.length) return '';" +
+            "  try {" +
+            "    var dataUrl = canvases[canvases.length - 1].toDataURL('image/png');" +
+            "    return dataUrl.split(',')[1] || '';" +
+            "  } catch (e) { return 'ERR:' + e.message; }" +
+            "})()"
+        );
+        if (canvasOnlyB64 && canvasOnlyB64.length > 100 && !canvasOnlyB64.startsWith("ERR:")) {
+            return "BASE64:" + canvasOnlyB64;
+        }
+    }
+
+    // Strategy A: canvas toDataURL — works for blob: URLs (same-origin) and http: URLs
+    if (imgSrc) {
+        const b64 = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var src = " + JSON.stringify(imgSrc) + ";" +
+            "  var img = __codexImageCandidates().find(function(i){ return i.src === src; });" +
+            "  if (!img) return '';" +
+            "  try {" +
+            "    var canvas = document.createElement('canvas');" +
+            "    canvas.width  = img.naturalWidth  || img.width  || 512;" +
+            "    canvas.height = img.naturalHeight || img.height || 512;" +
+            "    var ctx = canvas.getContext('2d');" +
+            "    ctx.drawImage(img, 0, 0);" +
+            "    var dataUrl = canvas.toDataURL('image/png');" +
+            "    return dataUrl.split(',')[1] || '';" +
+            "  } catch(e) { return 'ERR:' + e.message; }" +
+            "})()"
+        );
+        if (b64 && b64.length > 100 && !b64.startsWith("ERR:")) {
+            return "BASE64:" + b64;
+        }
+        // canvas failed (CORS or tainted) → fall through to download
+        dlReady = true;
+    }
+
+    // Strategy A2: fetch image bytes inside the page and convert to base64 asynchronously.
+    if (imgSrc) {
+        for (let i = 0; i < 60; i++) {
+            delay(1);
+            const fetchB64 = runJs(
+                "(function(){" +
+                "  var src = " + JSON.stringify(imgSrc) + ";" +
+                "  if (window.__codexImgFetchSrc !== src) {" +
+                "    window.__codexImgFetchSrc = src;" +
+                "    window.__codexImgFetchDone = false;" +
+                "    window.__codexImgFetchData = '';" +
+                "    window.__codexImgFetchError = '';" +
+                "    fetch(src)" +
+                "      .then(function(resp){ return resp.blob(); })" +
+                "      .then(function(blob){" +
+                "        return new Promise(function(resolve){" +
+                "          var reader = new FileReader();" +
+                "          reader.onloadend = function(){" +
+                "            try {" +
+                "              var value = String(reader.result || '');" +
+                "              window.__codexImgFetchData = value.split(',')[1] || '';" +
+                "            } catch (e) {" +
+                "              window.__codexImgFetchError = String(e);" +
+                "            }" +
+                "            window.__codexImgFetchDone = true;" +
+                "            resolve();" +
+                "          };" +
+                "          reader.readAsDataURL(blob);" +
+                "        });" +
+                "      })" +
+                "      .catch(function(err){" +
+                "        window.__codexImgFetchError = String(err);" +
+                "        window.__codexImgFetchDone = true;" +
+                "      });" +
+                "    return 'PENDING';" +
+                "  }" +
+                "  if (!window.__codexImgFetchDone) return 'PENDING';" +
+                "  if (window.__codexImgFetchData) return window.__codexImgFetchData;" +
+                "  if (window.__codexImgFetchError) return 'ERR:' + window.__codexImgFetchError;" +
+                "  return 'PENDING';" +
+                "})()"
+            );
+            if (fetchB64 && fetchB64.length > 100 && !fetchB64.startsWith("ERR:") && fetchB64 !== "PENDING") {
+                return "BASE64:" + fetchB64;
+            }
+        }
+        dlReady = true;
+    }
+
+    // Strategy B: canvas on any blob image present + then click download as fallback
+    if (!dlReady) {
+        const hasDl = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var btns = __codexActionButtons();" +
+            "  var dl = btns.find(function(b){" +
+            "    var l = __codexLabel(b);" +
+            "    return l.includes('download') || l.includes('下载') || l.includes('save image') || l.includes('save') || l.includes('保存');" +
+            "  });" +
+            "  return dl ? 'yes' : 'no';" +
+            "})()"
+        );
+        if (hasDl === "yes") dlReady = true;
+    }
+
+    // When DL_READY but no imgSrc yet: try canvas on any blob image on page
+    if (dlReady && !imgSrc) {
+        const canvasB64 = runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var canvases = __codexCanvasCandidates();" +
+            "  if (canvases.length) {" +
+            "    try {" +
+            "      var dataUrl = canvases[canvases.length - 1].toDataURL('image/png');" +
+            "      var canvasB64 = dataUrl.split(',')[1] || '';" +
+            "      if (canvasB64.length > 100) return canvasB64;" +
+            "    } catch (e) {}" +
+            "  }" +
+            "  var imgs = __codexImageCandidates().filter(function(img){" +
+            "    var s = img.src||'';" +
+            "    return s.startsWith('blob:') || s.startsWith('data:image') || s.includes('googleusercontent') || s.includes('googleapis');" +
+            "  });" +
+            "  if (!imgs.length) return '';" +
+            "  var img = imgs[imgs.length-1];" +
+            "  try {" +
+            "    var canvas = document.createElement('canvas');" +
+            "    canvas.width  = img.naturalWidth  || img.width  || 512;" +
+            "    canvas.height = img.naturalHeight || img.height || 512;" +
+            "    var ctx = canvas.getContext('2d');" +
+            "    ctx.drawImage(img, 0, 0);" +
+            "    var dataUrl = canvas.toDataURL('image/png');" +
+            "    var b64 = dataUrl.split(',')[1] || '';" +
+            "    return b64.length > 100 ? b64 : '';" +
+            "  } catch(e) { return ''; }" +
+            "})()"
+        );
+        if (canvasB64 && canvasB64.length > 100) {
+            return "BASE64:" + canvasB64;
+        }
+    }
+
+    if (dlReady || imgSrc || canvasReady) {
+        runJs(
+            "(function(){" + DEEP_DOM_HELPER +
+            "  var btns = __codexActionButtons();" +
+            "  var dl = btns.find(function(b){" +
+            "    var l = __codexLabel(b);" +
+            "    return l.includes('download') || l.includes('下载') || l.includes('save image') || l.includes('save') || l.includes('保存');" +
+            "  });" +
+            "  if (dl) { dl.click(); return 'clicked'; }" +
+            "  return 'no-button';" +
+            "})()"
+        );
+        acceptSaveDialog();
+
+        let newFile = null;
+        for (let i = 0; i < 60; i++) {
+            delay(1.5);
+            if (i === 2 || i === 6) acceptSaveDialog();
+            const current  = listTrackedImages();
+            const newFiles = current.filter(function(f) {
+                if (!isImageFile(f)) return false;
+                if (beforeFiles.indexOf(f) === -1) return true;
+                const prevMtime = beforeSnapshot[f] || 0;
+                const currentMtime = fileMtime(f);
+                return currentMtime > prevMtime && currentMtime >= downloadStartedAt && fileSize(f) > 50000;
+            });
+            if (newFiles.length > 0) { newFile = newFiles[0]; break; }
+        }
+
+        if (newFile) {
+            const b64 = shell("base64 -i \"" + newFile + "\"").replace(/\s+/g, "");
+            shell("cp \"" + newFile + "\" \"" + outputPath + "\"");
+            return "BASE64:" + b64;
+        }
+
+        if (imgSrc) {
+            throw new Error("图片可见但无法下载，src=" + imgSrc.slice(0, 80));
+        }
+        throw new Error("下载按钮已点击但未发现新下载文件");
+    }
+
+    throw new Error("Gemini 图片生成超时（约300秒），最后状态=" + lastState + "，未检测到图片或下载按钮");
+}

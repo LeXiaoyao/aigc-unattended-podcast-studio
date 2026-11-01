@@ -1,0 +1,624 @@
+#!/usr/bin/osascript -l JavaScript
+
+ObjC.import("stdlib");
+
+function sleep(seconds) {
+  delay(seconds);
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function chrome() {
+  const app = Application("com.google.Chrome");
+  app.includeStandardAdditions = true;
+  return app;
+}
+
+function ensureChromeWindow(app) {
+  if (!app.running()) {
+    app.activate();
+    sleep(2);
+  }
+
+  const windows = app.windows();
+  if (windows.length > 0) {
+    return windows[0];
+  }
+
+  Application.currentApplication().doShellScript('open -a "Google Chrome"');
+  sleep(2);
+
+  if (app.windows().length === 0) {
+    throw new Error("Google Chrome 没有可用窗口，请先打开 Chrome");
+  }
+
+  return app.windows()[0];
+}
+
+function activeTab(win) {
+  return win.activeTab();
+}
+
+function runJs(tab, source) {
+  const result = tab.execute({ javascript: source });
+  if (result === undefined || result === null) {
+    return "";
+  }
+  return String(result);
+}
+
+function openUrl(tab, url) {
+  tab.url = url;
+}
+
+function waitFor(tab, description, timeoutSeconds, fnSource) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = runJs(tab, fnSource);
+    if (result === "true") {
+      return;
+    }
+    sleep(1);
+  }
+  throw new Error("Timed out waiting for " + description);
+}
+
+function waitForJson(tab, description, timeoutSeconds, fnSource) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const raw = runJs(tab, fnSource);
+    if (raw && raw !== "null" && raw !== "undefined" && raw !== "") {
+      return raw;
+    }
+    sleep(1);
+  }
+  throw new Error("Timed out waiting for " + description);
+}
+
+function clickByText(tab, text, timeoutSeconds) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = runJs(
+      tab,
+      `
+        (() => {
+          const fireClick = (el) => {
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const options = {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX: rect.left + Math.min(rect.width / 2, 20),
+              clientY: rect.top + Math.min(rect.height / 2, 20)
+            };
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+              el.dispatchEvent(new MouseEvent(type, options));
+            });
+            return true;
+          };
+
+          const visible = (node) => {
+            const rect = node.getBoundingClientRect();
+            const style = window.getComputedStyle(node);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+          };
+
+          const score = (node) => {
+            const rect = node.getBoundingClientRect();
+            return rect.top * 10000 + rect.left;
+          };
+
+          const nodes = [...document.querySelectorAll('button, a, div, span, li')]
+            .filter(visible)
+            .filter((node) => (node.textContent || '').includes(${JSON.stringify(text)}))
+            .sort((a, b) => score(a) - score(b));
+
+          const match = nodes[0];
+          if (!match) return 'false';
+
+          const chain = [
+            match,
+            match.closest('button'),
+            match.closest('a'),
+            match.closest('[role="menuitem"]'),
+            match.closest('[role="button"]'),
+            match.parentElement,
+            match.parentElement ? match.parentElement.parentElement : null
+          ].filter(Boolean);
+
+          for (const node of chain) {
+            fireClick(node);
+          }
+          return 'true';
+        })()
+      `
+    );
+
+    if (result === "true") {
+      return;
+    }
+    sleep(1);
+  }
+  throw new Error("Could not click " + text);
+}
+
+function waitForVisibleText(tab, text, timeoutSeconds) {
+  waitFor(
+    tab,
+    text,
+    timeoutSeconds,
+    `
+      (() => {
+        const nodes = [...document.querySelectorAll('button, a, div, span, li')];
+        const found = nodes.find((node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            (node.textContent || '').includes(${JSON.stringify(text)});
+        });
+        return found ? 'true' : 'false';
+      })()
+    `
+  );
+}
+
+function clickTopRightExport(tab, timeoutSeconds) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = runJs(
+      tab,
+      `
+        (() => {
+          const fireClick = (el) => {
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const options = {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2
+            };
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+              el.dispatchEvent(new MouseEvent(type, options));
+            });
+            return true;
+          };
+
+          const visible = (node) => {
+            const rect = node.getBoundingClientRect();
+            const style = window.getComputedStyle(node);
+            return rect.width > 40 &&
+              rect.height > 24 &&
+              rect.top >= 0 &&
+              rect.top < 220 &&
+              rect.left > window.innerWidth * 0.55 &&
+              style.display !== 'none' &&
+              style.visibility !== 'hidden';
+          };
+
+          const candidates = [...document.querySelectorAll('button, a, div')]
+            .filter(visible)
+            .filter((node) => (node.textContent || '').includes('导出'))
+            .sort((a, b) => {
+              const ar = a.getBoundingClientRect();
+              const br = b.getBoundingClientRect();
+              return (ar.top - br.top) || (br.right - ar.right);
+            });
+
+          const target = candidates[0];
+          if (!target) return 'false';
+
+          fireClick(target);
+          return 'true';
+        })()
+      `
+    );
+
+    if (result === "true") {
+      return;
+    }
+    sleep(1);
+  }
+  throw new Error("Could not click top-right export button");
+}
+
+function clickFirstExportMenuItem(tab, timeoutSeconds) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = runJs(
+      tab,
+      `
+        (() => {
+          const fireClick = (el, x, y) => {
+            if (!el) return false;
+            const options = {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX: x,
+              clientY: y
+            };
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+              el.dispatchEvent(new MouseEvent(type, options));
+            });
+            if (typeof el.click === 'function') {
+              try { el.click(); } catch (e) {}
+            }
+            return true;
+          };
+
+          const visible = (node) => {
+            const rect = node.getBoundingClientRect();
+            const style = window.getComputedStyle(node);
+            return rect.width > 80 &&
+              rect.height > 30 &&
+              rect.top >= 0 &&
+              rect.top < 320 &&
+              rect.left > window.innerWidth * 0.55 &&
+              style.display !== 'none' &&
+              style.visibility !== 'hidden';
+          };
+
+          const exportButtons = [...document.querySelectorAll('button, a, div')]
+            .filter(visible)
+            .filter((node) => (node.textContent || '').includes('导出'))
+            .sort((a, b) => {
+              const ar = a.getBoundingClientRect();
+              const br = b.getBoundingClientRect();
+              return (ar.top - br.top) || (br.right - ar.right);
+            });
+
+          const target = exportButtons[0];
+          if (!target) return 'false';
+
+          const rect = target.getBoundingClientRect();
+          const points = [
+            [rect.left + Math.min(rect.width * 0.28, 56), rect.bottom + 24],
+            [rect.left + Math.min(rect.width * 0.28, 56), rect.bottom + 34],
+            [rect.left + Math.min(rect.width * 0.45, 90), rect.bottom + 24],
+            [rect.left + Math.min(rect.width * 0.45, 90), rect.bottom + 34]
+          ];
+
+          for (const [x, y] of points) {
+            const hits = (document.elementsFromPoint(x, y) || []).filter(Boolean);
+            const chain = [];
+            for (const hit of hits) {
+              chain.push(
+                hit,
+                hit.closest('button'),
+                hit.closest('a'),
+                hit.closest('[role="menuitem"]'),
+                hit.parentElement,
+                hit.parentElement ? hit.parentElement.parentElement : null
+              );
+            }
+
+            for (const node of chain) {
+              fireClick(node, x, y);
+            }
+          }
+          return 'true';
+        })()
+      `
+    );
+
+    if (result === "true") {
+      return;
+    }
+    sleep(1);
+  }
+  throw new Error("Could not click first export menu item");
+}
+
+function clickCenterPlay(tab, timeoutSeconds) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = runJs(
+      tab,
+      `
+        (() => {
+          const fireClick = (el) => {
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const options = {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2
+            };
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+              el.dispatchEvent(new MouseEvent(type, options));
+            });
+            if (typeof el.click === 'function') {
+              try { el.click(); } catch (e) {}
+            }
+            return true;
+          };
+
+          const visible = (node) => {
+            const rect = node.getBoundingClientRect();
+            const style = window.getComputedStyle(node);
+            return rect.width > 160 &&
+              rect.height > 40 &&
+              rect.top > 150 &&
+              rect.left > 350 &&
+              style.display !== 'none' &&
+              style.visibility !== 'hidden';
+          };
+
+          const candidates = [...document.querySelectorAll('button, div, span')]
+            .filter(visible)
+            .filter((node) => (node.textContent || '').includes('分钟'))
+            .sort((a, b) => {
+              const ar = a.getBoundingClientRect();
+              const br = b.getBoundingClientRect();
+              return (ar.top - br.top) || (ar.left - br.left);
+            });
+
+          const target = candidates[0];
+          if (!target) return 'false';
+          fireClick(target);
+          return 'true';
+        })()
+      `
+    );
+
+    if (result === "true") {
+      return;
+    }
+    sleep(1);
+  }
+  throw new Error("Could not click play button");
+}
+
+function openPodcastAndGetLatest(url) {
+  const app = chrome();
+  const win = ensureChromeWindow(app);
+  const tab = activeTab(win);
+  openUrl(tab, url);
+
+  waitFor(
+    tab,
+    "podcast page to load",
+    30,
+    `
+      (() => {
+        return document.readyState === 'complete' ? 'true' : 'false';
+      })()
+    `
+  );
+
+  runJs(
+    tab,
+    `
+      (() => {
+        const textMatch = (value, target) => (value || '').replace(/\\s+/g, '') === target;
+        const nodes = [...document.querySelectorAll('button, a, div, span')];
+        const target = nodes.find((node) => textMatch(node.textContent, '我的作品'));
+        if (target) {
+          const clickable = target.closest('button, a, [role="tab"], [role="button"]') || target;
+          clickable.click();
+          return 'true';
+        }
+        return 'false';
+      })()
+    `
+  );
+
+  const clicked = waitForJson(
+    tab,
+    "latest episode card",
+    45,
+    `
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 150 && rect.height > 150 && rect.top > 150 && rect.left > 250 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+
+        const fireClick = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + Math.min(rect.width / 2, 20),
+            clientY: rect.top + Math.min(rect.height / 2, 20)
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          return true;
+        };
+
+        const candidates = [...document.querySelectorAll('img')]
+          .filter(isVisible)
+          .map((img) => {
+            const rect = img.getBoundingClientRect();
+            return {
+              node: img,
+              left: rect.left,
+              top: rect.top,
+              area: rect.width * rect.height
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => {
+            if (Math.abs(a.top - b.top) > 40) return a.top - b.top;
+            return a.left - b.left;
+          });
+
+        if (!candidates.length) return '';
+
+        const first = candidates[0].node;
+        const chain = [
+          first,
+          first.parentElement,
+          first.parentElement ? first.parentElement.parentElement : null,
+          first.closest('a'),
+          first.closest('[role="button"]'),
+          first.closest('[tabindex]'),
+          first.closest('div')
+        ].filter(Boolean);
+
+        for (const node of chain) {
+          fireClick(node);
+        }
+
+        return 'clicked';
+      })()
+    `
+  );
+
+  if (clicked !== "clicked") {
+    throw new Error("Could not click latest episode card");
+  }
+
+  waitFor(
+    tab,
+    "episode page after opening latest card",
+    45,
+    `
+      (() => location.href.includes('/app/episode/') ? 'true' : 'false')()
+    `
+  );
+
+  return runJs(
+    tab,
+    `
+      (() => JSON.stringify({
+        href: location.href,
+        title: document.querySelector('h1')?.textContent?.trim() || document.title || ''
+      }))()
+    `
+  );
+}
+
+function openEpisodeAndExport(url) {
+  const app = chrome();
+  const win = ensureChromeWindow(app);
+  const tab = activeTab(win);
+  openUrl(tab, url);
+
+  waitFor(
+    tab,
+    "episode page to load",
+    45,
+    `
+      (() => {
+        const hasHeading = !!document.querySelector('h1');
+        return document.readyState === 'complete' && hasHeading ? 'true' : 'false';
+      })()
+    `
+  );
+
+  try {
+    clickCenterPlay(tab, 10);
+    sleep(2);
+  } catch (error) {
+  }
+
+  const metaRaw = waitForJson(
+    tab,
+    "episode metadata",
+    25,
+    `
+      (() => {
+        const title = document.querySelector('h1')?.textContent?.trim() || document.title || '';
+        if (!title) return '';
+
+        const firstMatch = (items) => items.find(Boolean) || '';
+
+        const audioFromDom = [
+          ...document.querySelectorAll('audio[src], audio source[src], source[src], a[href$=".mp3"], [src$=".mp3"]')
+        ]
+          .map((node) => node.currentSrc || node.src || node.href || '')
+          .find((value) => value && value.includes('.mp3'));
+
+        const audioFromPerf = performance.getEntriesByType('resource')
+          .map((entry) => entry.name || '')
+          .find((value) => value && value.includes('.mp3'));
+
+        const html = document.documentElement.outerHTML || '';
+        const audioFromHtmlMatch = html.match(/https:\\/\\/[^"'\\s]+\\.mp3[^"'\\s]*/i);
+        const audioUrl = firstMatch([
+          audioFromDom,
+          audioFromPerf,
+          audioFromHtmlMatch ? audioFromHtmlMatch[0].replace(/\\\\u002F/g, '/').replace(/\\\\/g, '') : ''
+        ]);
+
+        const coverCandidates = [...document.querySelectorAll('img')]
+          .map((img) => {
+            const rect = img.getBoundingClientRect();
+            return {
+              src: img.currentSrc || img.src || '',
+              width: rect.width,
+              height: rect.height,
+              top: rect.top
+            };
+          })
+          .filter((img) => img.src && img.width >= 80 && img.height >= 80 && img.top > -50)
+          .sort((a, b) => {
+            const areaDiff = (b.width * b.height) - (a.width * a.height);
+            if (areaDiff !== 0) return areaDiff;
+            return a.top - b.top;
+          });
+
+        return JSON.stringify({
+          title,
+          audioUrl,
+          coverUrl: coverCandidates[0] ? coverCandidates[0].src : '',
+          pageUrl: location.href
+        });
+      })()
+    `
+  );
+
+  return metaRaw;
+}
+
+function printUsage() {
+  console.log("Usage: listenhub_fetch_latest.jxa latest <podcast_url> | export <episode_url>");
+}
+
+function run(argv) {
+  try {
+    if (argv.length < 2) {
+      printUsage();
+      return;
+    }
+
+    const action = argv[0];
+    const url = argv[1];
+
+    if (action === "latest") {
+      console.log(openPodcastAndGetLatest(url));
+      return;
+    }
+
+    if (action === "export") {
+      console.log(openEpisodeAndExport(url));
+      return;
+    }
+
+    printUsage();
+  } catch (error) {
+    console.log(JSON.stringify({ error: String(error) }));
+    $.exit(1);
+  }
+}

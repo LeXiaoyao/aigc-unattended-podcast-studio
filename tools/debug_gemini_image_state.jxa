@@ -1,0 +1,80 @@
+#!/usr/bin/osascript -l JavaScript
+
+function run() {
+    const chrome = Application("com.google.Chrome");
+    const windows = chrome.windows();
+    let targetTab = null;
+    for (let i = 0; i < windows.length; i++) {
+        try {
+            const title = String(windows[i].activeTab().title());
+            if (title.includes("Gemini")) {
+                targetTab = windows[i].activeTab();
+                break;
+            }
+        } catch (e) {}
+    }
+    if (!targetTab) {
+        return "NO_GEMINI_TAB";
+    }
+
+    const js = `
+        (function() {
+          function all(sel) {
+            var out = [], seen = [], stack = [document];
+            while (stack.length) {
+              var root = stack.pop();
+              if (!root || seen.indexOf(root) >= 0) continue;
+              seen.push(root);
+              try {
+                if (root.querySelectorAll) {
+                  Array.from(root.querySelectorAll(sel)).forEach(function(el) { out.push(el); });
+                  Array.from(root.querySelectorAll('*')).forEach(function(el) {
+                    if (el.shadowRoot) stack.push(el.shadowRoot);
+                  });
+                }
+              } catch (e) {}
+            }
+            return out;
+          }
+          function label(el) {
+            try {
+              return String(
+                (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('data-tooltip'))) ||
+                el.title || el.innerText || el.textContent || ''
+              ).toLowerCase();
+            } catch (e) {
+              return '';
+            }
+          }
+          var imgs = all('img').map(function(img) {
+            var r = img.getBoundingClientRect();
+            return {
+              src: img.src || '',
+              w: r.width,
+              h: r.height,
+              nw: img.naturalWidth || 0,
+              nh: img.naturalHeight || 0
+            };
+          }).filter(function(x) { return x.w > 80 && x.h > 80; });
+          var canvases = all('canvas').map(function(c) {
+            var r = c.getBoundingClientRect();
+            return {
+              w: r.width,
+              h: r.height,
+              cw: c.width || 0,
+              ch: c.height || 0
+            };
+          }).filter(function(x) { return x.w > 80 && x.h > 80; });
+          var buttons = all('button,[role="button"],[aria-label],[title]')
+            .map(function(b) { return label(b); })
+            .filter(Boolean);
+          return JSON.stringify({
+            imgs: imgs.slice(-12),
+            canvases: canvases.slice(-12),
+            buttons: buttons.slice(-60)
+          });
+        })()
+    `;
+
+    return targetTab.execute({javascript: js});
+}

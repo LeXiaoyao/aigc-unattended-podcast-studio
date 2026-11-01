@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ episode.title or episode.id }} · AI观测站{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-10">
+  <!-- Back -->
+  <a href="/episodes" class="text-gray-500 hover:text-white text-sm mb-6 inline-flex items-center gap-1 transition-colors">
+    ← 返回列表
+  </a>
+
+  <div class="mt-4 flex flex-col lg:flex-row gap-8">
+    <!-- Left: Cover + Audio -->
+    <div class="lg:w-72 flex-shrink-0">
+      <div class="aspect-square rounded-2xl overflow-hidden bg-gray-800 shadow-xl shadow-black/40">
+        <img src="{{ episode.cover_url }}" alt="{{ episode.title }}" class="w-full h-full object-cover" onerror="this.src='/static/cover_placeholder.svg'">
+      </div>
+      {% if episode.audio_url %}
+      <div class="mt-4">
+        <audio controls class="w-full rounded-lg" style="accent-color: #6366f1">
+          <source src="{{ episode.audio_url }}" type="audio/mpeg">
+        </audio>
+      </div>
+      {% endif %}
+      {% if episode.xiaoyuzhou_link %}
+      <a href="{{ episode.xiaoyuzhou_link }}" target="_blank" rel="noopener" class="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+        在小宇宙收听 ↗
+      </a>
+      {% endif %}
+    </div>
+
+    <!-- Right: Info -->
+    <div class="flex-1 min-w-0">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        {% if episode.flow_type == 'solo' %}
+        <span class="badge-solo">单人播报</span>
+        {% else %}
+        <span class="badge-dual">双人口播</span>
+        {% endif %}
+        <span class="text-gray-500 text-sm">{{ episode.date }}</span>
+        <span class="status-{{ episode.status }} text-sm">
+          {% if episode.status == 'published' %}✓ 已发布{% elif episode.status == 'audio_ready' %}◉ 已生成{% else %}○ 草稿{% endif %}
+        </span>
+      </div>
+
+      <h1 class="text-2xl lg:text-3xl font-bold text-white leading-tight mb-6">
+        {{ episode.title or episode.id }}
+      </h1>
+
+      <!-- Trends -->
+      {% if episode.trends_list %}
+      <div class="mb-6">
+        <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">本期三大趋势</h2>
+        <div class="space-y-2">
+          {% for trend in episode.trends_list %}
+          <div class="flex items-start gap-3 bg-gray-900 rounded-lg px-4 py-3 border border-gray-800">
+            <span class="text-brand-500 font-bold text-sm mt-0.5">0{{ loop.index }}</span>
+            <span class="text-gray-200 text-sm leading-relaxed">{{ trend }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Products -->
+      {% if episode.products_list %}
+      <div class="mb-6">
+        <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">产品洞察</h2>
+        <div class="flex flex-wrap gap-2">
+          {% for p in episode.products_list %}
+          <span class="px-3 py-1 bg-gray-800 text-gray-300 text-xs rounded-full border border-gray-700">{{ p }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Script preview -->
+      {% if script_preview %}
+      <div class="mb-6">
+        <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">节目脚本节选</h2>
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-gray-400 text-sm leading-relaxed whitespace-pre-line max-h-48 overflow-y-auto">{{ script_preview }}</div>
+      </div>
+      {% endif %}
+
+      <!-- Metadata -->
+      <div class="text-xs text-gray-600 space-y-1">
+        <p>期数：{{ episode.id }}</p>
+        {% if episode.listenhub_url %}
+        <p>ListenHub: <a href="{{ episode.listenhub_url }}" target="_blank" class="hover:text-gray-400">{{ episode.listenhub_url[:60] }}...</a></p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

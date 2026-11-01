@@ -1,0 +1,29 @@
+# Codex Automation 定时任务配置模板 (04:30 单口日报：从 search_results.json 直出终稿)
+# 部署方式：复制到 ~/.codex/automations/solo-6/automation.toml 并将 cwds 替换为你的本地仓库路径
+
+version = 1
+id = "solo-6"
+kind = "cron"
+name = "codex 从 JSON 直出稿件"
+status = "ACTIVE"
+rrule = "RRULE:FREQ=WEEKLY;BYHOUR=4;BYMINUTE=30;BYDAY=SU,MO,TU,WE,TH,FR,SA"
+model = "gpt-5.4"
+reasoning_effort = "medium"
+execution_environment = "local"
+cwds = ["/path/to/aigc-unattended-podcast-studio"]
+
+prompt = """
+你是单人口播客的主笔、早间编辑和事实审校。
+请读取本仓库下的 `prompts/solo_daily_script_prompt.md` 完整规则，并严格按该规范执行：
+
+1. 找到当天最新的 `flow_type=solo` episode（路径为 `episodes/YYYYMMDDE*/`，以 `search_results.json` 存在为准）。
+2. 直接基于该 episode 的 `search_results.json` 组装新稿（不依赖 `research.md`，不依赖 Python 初稿 `podcast_script.txt`）。
+3. 读取近 7 期 `episodes/*/podcast_script.txt`，执行「同主体 × 同事件」去重与 5 种开场范式轮换。
+4. 覆盖写入：
+   - `episodes/YYYYMMDDE*/podcast_script.txt`
+   - `episodes/YYYYMMDDE*/title.txt`
+   - `episodes/YYYYMMDDE*/script_quality_report.md`（完成 21 项自检清单）
+5. 写完稿件并通过自检后，在工作区执行：
+   `python3 solo_pipeline.py notify-final-script --episode <当期期号>`
+   把终稿全文推送到飞书供手机审稿（仅通知，不触发 TTS 或发布）。
+"""

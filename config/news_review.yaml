@@ -1,0 +1,32 @@
+lookback_episodes: 7
+min_score_for_suspicious_reject: 70
+high_value_keywords:
+  - model release
+  - open source
+  - GitHub
+  - agent
+  - AI agent
+  - Claude
+  - OpenAI
+  - Google
+  - Gemini
+  - Anthropic
+  - Meta
+  - Microsoft
+  - Nvidia
+  - 融资
+  - 开源
+  - 发布
+  - 模型
+  - 智能体
+  - 算力
+  - 芯片
+  - 监管
+  - 产品发布
+  - 大厂动态
+  - 开源爆款
+duplicate_similarity_threshold: 0.72
+recent_duplicate_threshold: 0.68
+max_missed_news_candidates: 10
+max_recent_episodes_to_scan: 7
+

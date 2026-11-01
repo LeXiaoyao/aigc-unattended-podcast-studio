@@ -1,0 +1,74 @@
+#!/usr/bin/osascript -l JavaScript
+
+ObjC.import("Foundation");
+
+function run(args) {
+    const outputPath = args[0] || "/tmp/gemini_blob_test.png";
+    const chrome = Application("com.google.Chrome");
+    const windows = chrome.windows();
+    let targetTab = null;
+    for (let i = 0; i < windows.length; i++) {
+        try {
+            const title = String(windows[i].activeTab().title());
+            if (title.includes("Gemini")) {
+                targetTab = windows[i].activeTab();
+                break;
+            }
+        } catch (e) {}
+    }
+    if (!targetTab) {
+        throw new Error("NO_GEMINI_TAB");
+    }
+
+    const js = `
+        (function() {
+          function all(sel) {
+            var out = [], seen = [], stack = [document];
+            while (stack.length) {
+              var root = stack.pop();
+              if (!root || seen.indexOf(root) >= 0) continue;
+              seen.push(root);
+              try {
+                if (root.querySelectorAll) {
+                  Array.from(root.querySelectorAll(sel)).forEach(function(el) { out.push(el); });
+                  Array.from(root.querySelectorAll('*')).forEach(function(el) {
+                    if (el.shadowRoot) stack.push(el.shadowRoot);
+                  });
+                }
+              } catch (e) {}
+            }
+            return out;
+          }
+          var imgs = all('img').filter(function(img) {
+            try {
+              var r = img.getBoundingClientRect();
+              return r.width > 150 && r.height > 150 && img.src;
+            } catch (e) {
+              return false;
+            }
+          });
+          if (!imgs.length) return 'NO_IMAGE';
+          var img = imgs[imgs.length - 1];
+          try {
+            var canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width || 1024;
+            canvas.height = img.naturalHeight || img.height || 1024;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            var dataUrl = canvas.toDataURL('image/png');
+            return 'OK:' + dataUrl.split(',')[1];
+          } catch (e) {
+            return 'CANVAS_ERR:' + String(e);
+          }
+        })()
+    `;
+
+    const result = String(targetTab.execute({javascript: js}) || "");
+    if (!result.startsWith("OK:")) {
+        throw new Error(result || "UNKNOWN_RESULT");
+    }
+    const b64 = result.slice(3);
+    const data = $.NSData.alloc.initWithBase64EncodedStringOptions($(b64), 0);
+    data.writeToFileAtomically($(outputPath), true);
+    return outputPath;
+}

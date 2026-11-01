@@ -1,0 +1,810 @@
+{% extends "base.html" %}
+{% block title %}调度控制台 · AI观测站{% endblock %}
+
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+<style>
+.ep-btn {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.4rem;
+  border-width: 1px;
+  border-style: solid;
+  transition: background-color 0.15s;
+  white-space: nowrap;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-white">调度控制台</h1>
+      <p class="text-gray-500 text-sm mt-1">管理播客生成计划与发布频次</p>
+    </div>
+    <a href="/admin/logout" class="text-xs text-gray-600 hover:text-gray-400 transition-colors">退出登录</a>
+  </div>
+
+  <!-- Calendar -->
+  <div class="bg-gray-900 rounded-2xl border border-gray-800 p-5 mb-8">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">发布日历</h2>
+    <div id="calendar" class="fc-dark"></div>
+  </div>
+
+  <!-- Schedule Cards -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+
+    <!-- Dual Host Card -->
+    <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h2 class="text-white font-semibold flex items-center gap-2">
+            <span class="badge-dual">双人口播</span>
+          </h2>
+          <p class="text-gray-500 text-xs mt-1">ListenHub 合成 · 每日生成 · 次日 07:00 发布</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="dual_host_enabled" {{ 'checked' if config.dual_host.enabled else '' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs text-gray-500 mb-2 block">发布日期</label>
+          <div class="flex flex-wrap gap-2" id="dual_host_days">
+            {% for name in day_names %}
+            <button type="button" class="day-btn {{ 'active' if loop.index0 in config.dual_host.days_of_week else '' }}"
+              data-flow="dual_host" data-day="{{ loop.index0 }}">{{ name }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 mb-1 block">生成时间</label>
+            <div class="flex items-center gap-1">
+              <select id="dual_host_hour" class="select-field">
+                {% for h in range(24) %}
+                <option value="{{ h }}" {{ 'selected' if h == config.dual_host.hour else '' }}>{{ '%02d' % h }}</option>
+                {% endfor %}
+              </select>
+              <span class="text-gray-500">:</span>
+              <select id="dual_host_minute" class="select-field">
+                {% for m in [0, 5, 10, 15, 20, 30, 45] %}
+                <option value="{{ m }}" {{ 'selected' if m == config.dual_host.minute else '' }}>{{ '%02d' % m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 mb-1 block">发布日</label>
+            <select id="dual_host_publish_day_offset" class="select-field">
+              <option value="0" {{ 'selected' if config.dual_host.get('publish_day_offset', 1) == 0 else '' }}>当日</option>
+              <option value="1" {{ 'selected' if config.dual_host.get('publish_day_offset', 1) == 1 else '' }}>次日</option>
+            </select>
+          </div>
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 mb-1 block">发布时间</label>
+            <div class="flex items-center gap-1">
+              <select id="dual_host_pub_hour" class="select-field">
+                {% for h in range(24) %}
+                <option value="{{ h }}" {{ 'selected' if h == config.dual_host.publish_hour else '' }}>{{ '%02d' % h }}</option>
+                {% endfor %}
+              </select>
+              <span class="text-gray-500">:</span>
+              <select id="dual_host_pub_minute" class="select-field">
+                {% for m in [0, 15, 30, 45] %}
+                <option value="{{ m }}" {{ 'selected' if m == config.dual_host.publish_minute else '' }}>{{ '%02d' % m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 flex gap-2">
+        <button onclick="triggerPipeline('dual_host')" class="btn-run flex-1">
+          ▶ 立即生成
+        </button>
+        <div id="dual_host_status" class="text-xs text-gray-500 self-center"></div>
+      </div>
+    </div>
+
+    <!-- Solo Card -->
+    <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h2 class="text-white font-semibold flex items-center gap-2">
+            <span class="badge-solo">单人播报</span>
+          </h2>
+          <p class="text-gray-500 text-xs mt-1">MiniMax 新闻女主播 · 每日生成待确认</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="solo_enabled" {{ 'checked' if config.solo.enabled else '' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs text-gray-500 mb-2 block">发布日期</label>
+          <div class="flex flex-wrap gap-2" id="solo_days">
+            {% for name in day_names %}
+            <button type="button" class="day-btn {{ 'active' if loop.index0 in config.solo.days_of_week else '' }}"
+              data-flow="solo" data-day="{{ loop.index0 }}">{{ name }}</button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Daily frequency -->
+        <div>
+          <label class="text-xs text-gray-500 mb-2 block">每日发布频次</label>
+          <div id="solo_daily_runs" class="space-y-2">
+            <!-- Populated by JS -->
+          </div>
+          <button type="button" onclick="addSoloRun()" class="mt-2 text-xs px-3 py-1 bg-teal-900/40 border border-teal-800 text-teal-300 rounded-lg hover:bg-teal-900/70">
+            + 增加一次
+          </button>
+        </div>
+
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 mb-1 block">发布时间</label>
+            <div class="flex items-center gap-1">
+              <select id="solo_pub_hour" class="select-field">
+                {% for h in range(24) %}
+                <option value="{{ h }}" {{ 'selected' if h == config.solo.publish_hour else '' }}>{{ '%02d' % h }}</option>
+                {% endfor %}
+              </select>
+              <span class="text-gray-500">:</span>
+              <select id="solo_pub_minute" class="select-field">
+                {% for m in [0, 15, 30, 45] %}
+                <option value="{{ m }}" {{ 'selected' if m == config.solo.publish_minute else '' }}>{{ '%02d' % m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 flex gap-2">
+        <button onclick="triggerPipeline('solo')" class="btn-run-teal flex-1">
+          ▶ 立即生成
+        </button>
+        <div id="solo_status" class="text-xs text-gray-500 self-center"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Date Override Panel -->
+  <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">特定日期调整</h2>
+    <p class="text-gray-600 text-xs mb-4">可以为指定日期跳过发布，或设置不同于默认的发布次数和时间。</p>
+    <div class="flex flex-wrap gap-3 items-end mb-4">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">日期</label>
+        <input type="date" id="override_date" class="select-field" style="width:160px">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">操作</label>
+        <select id="override_action" class="select-field" onchange="toggleOverrideRuns()">
+          <option value="skip">跳过（不发布）</option>
+          <option value="custom">自定义频次</option>
+        </select>
+      </div>
+      <div id="override_runs_wrapper" style="display:none">
+        <label class="text-xs text-gray-500 mb-1 block">发布时间（逗号分隔，如 06:00,12:00,18:00）</label>
+        <input type="text" id="override_runs_input" class="select-field" placeholder="06:00,12:00" style="width:240px">
+      </div>
+      <button onclick="saveOverride()" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors">
+        设置
+      </button>
+    </div>
+    <div id="override_list" class="space-y-1 text-xs text-gray-400">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+
+  <!-- Dual Host Episode Management -->
+  <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6 mb-8" id="dualEpisodesPanel">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">双人口播节目操作</h2>
+      <button onclick="loadDualEpisodes()" class="text-xs px-3 py-1 bg-gray-800 border border-gray-700 text-gray-400 rounded-lg hover:bg-gray-700">↻ 刷新</button>
+    </div>
+
+    <div id="dualEpisodesList" class="space-y-2 mb-4">
+      <p class="text-gray-600 text-xs">加载中...</p>
+    </div>
+
+    <!-- Per-episode log area for dual -->
+    <div id="dualEpLogContainer" class="hidden">
+      <div class="flex items-center justify-between mb-2">
+        <span id="dualEpLogTitle" class="text-xs text-gray-500"></span>
+        <button onclick="closeDualEpLog()" class="text-xs text-gray-600 hover:text-gray-400">✕ 关闭</button>
+      </div>
+      <pre id="dualEpLogBox" class="bg-gray-950 rounded-lg p-3 text-xs text-gray-400 font-mono h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed"></pre>
+    </div>
+  </div>
+
+  <!-- Solo Episode Management -->
+  <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6 mb-8" id="soloEpisodesPanel">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">单人口播节目操作</h2>
+      <button onclick="loadSoloEpisodes()" class="text-xs px-3 py-1 bg-gray-800 border border-gray-700 text-gray-400 rounded-lg hover:bg-gray-700">↻ 刷新</button>
+    </div>
+
+    <div id="soloEpisodesList" class="space-y-2 mb-4">
+      <p class="text-gray-600 text-xs">加载中...</p>
+    </div>
+
+    <!-- Per-episode log area -->
+    <div id="epLogContainer" class="hidden">
+      <div class="flex items-center justify-between mb-2">
+        <span id="epLogTitle" class="text-xs text-gray-500"></span>
+        <button onclick="closeEpLog()" class="text-xs text-gray-600 hover:text-gray-400">✕ 关闭</button>
+      </div>
+      <pre id="epLogBox" class="bg-gray-950 rounded-lg p-3 text-xs text-gray-400 font-mono h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed"></pre>
+    </div>
+  </div>
+
+  <!-- Save Button -->
+  <div class="flex justify-end mb-8">
+    <button id="saveBtn" onclick="saveConfig()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+      保存调度设置
+    </button>
+    <span id="saveStatus" class="ml-3 text-sm text-gray-500 self-center"></span>
+  </div>
+
+  <!-- Live Log -->
+  <div class="bg-gray-900 rounded-2xl border border-gray-800 p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">运行日志</h2>
+      <div class="flex gap-2">
+        <button onclick="startLogs('dual_host')" class="text-xs px-3 py-1 bg-indigo-900/40 border border-indigo-800 text-indigo-300 rounded-lg hover:bg-indigo-900/70">双人口播日志</button>
+        <button onclick="startLogs('solo')" class="text-xs px-3 py-1 bg-teal-900/40 border border-teal-800 text-teal-300 rounded-lg hover:bg-teal-900/70">单人播报日志</button>
+      </div>
+    </div>
+    <pre id="logBox" class="bg-gray-950 rounded-lg p-4 text-xs text-gray-400 font-mono h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">点击上方按钮查看实时日志...</pre>
+  </div>
+
+</div>
+
+<script>
+// ── Config data from server ────────────────────────────
+const serverConfig = {{ config | tojson }};
+
+// ── Day selection ──────────────────────────────────────
+document.querySelectorAll('.day-btn').forEach(btn => {
+  btn.addEventListener('click', () => btn.classList.toggle('active'));
+});
+
+function getSelectedDays(flow) {
+  return Array.from(document.querySelectorAll(`.day-btn[data-flow="${flow}"].active`))
+    .map(b => parseInt(b.dataset.day));
+}
+
+// ── Solo daily runs management ─────────────────────────
+function initSoloRuns() {
+  const runs = (serverConfig.solo && serverConfig.solo.daily_runs) || [
+    {hour: serverConfig.solo?.hour || 4, minute: serverConfig.solo?.minute || 0}
+  ];
+  const container = document.getElementById('solo_daily_runs');
+  container.innerHTML = '';
+  runs.forEach((run, i) => addSoloRunRow(run.hour, run.minute, i));
+}
+
+function addSoloRunRow(hour, minute, index) {
+  const container = document.getElementById('solo_daily_runs');
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-2 solo-run-row';
+  row.innerHTML = `
+    <span class="text-xs text-gray-500">第${container.children.length + 1}次</span>
+    <select class="select-field solo-run-hour">
+      ${[...Array(24)].map((_, h) => `<option value="${h}" ${h === hour ? 'selected' : ''}>${String(h).padStart(2,'0')}</option>`).join('')}
+    </select>
+    <span class="text-gray-500">:</span>
+    <select class="select-field solo-run-minute">
+      ${[0,5,10,15,20,30,45].map(m => `<option value="${m}" ${m === minute ? 'selected' : ''}>${String(m).padStart(2,'0')}</option>`).join('')}
+    </select>
+    <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-400 text-xs px-1">&times;</button>
+  `;
+  container.appendChild(row);
+}
+
+function addSoloRun() {
+  addSoloRunRow(12, 0);
+}
+
+function getSoloDailyRuns() {
+  return Array.from(document.querySelectorAll('.solo-run-row')).map(row => ({
+    hour: parseInt(row.querySelector('.solo-run-hour').value),
+    minute: parseInt(row.querySelector('.solo-run-minute').value),
+  }));
+}
+
+// ── Date override management ───────────────────────────
+function toggleOverrideRuns() {
+  const action = document.getElementById('override_action').value;
+  document.getElementById('override_runs_wrapper').style.display = action === 'custom' ? '' : 'none';
+}
+
+async function saveOverride() {
+  const date = document.getElementById('override_date').value;
+  if (!date) { alert('请选择日期'); return; }
+  const action = document.getElementById('override_action').value;
+
+  let body = { date };
+  if (action === 'skip') {
+    body.skip = true;
+  } else {
+    const raw = document.getElementById('override_runs_input').value.trim();
+    if (!raw) { alert('请输入发布时间'); return; }
+    body.runs = raw.split(',').map(t => {
+      const [h, m] = t.trim().split(':').map(Number);
+      return { hour: h || 0, minute: m || 0 };
+    });
+  }
+
+  try {
+    const resp = await fetch('/admin/schedule/date-override', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      loadOverrides(result.overrides);
+    } else {
+      alert(result.error || '设置失败');
+    }
+  } catch(e) { alert('网络错误: ' + e.message); }
+}
+
+async function removeOverride(date) {
+  const resp = await fetch('/admin/schedule/date-override', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ date, remove: true }),
+  });
+  const result = await resp.json();
+  if (result.ok) loadOverrides(result.overrides);
+}
+
+function loadOverrides(overrides) {
+  const container = document.getElementById('override_list');
+  if (!overrides || Object.keys(overrides).length === 0) {
+    container.innerHTML = '<span class="text-gray-600">暂无特定日期调整</span>';
+    return;
+  }
+  container.innerHTML = Object.entries(overrides).sort().map(([date, cfg]) => {
+    const desc = cfg.skip ? '<span class="text-red-400">跳过</span>' :
+      '<span class="text-teal-400">' + (cfg.runs || []).map(r => `${String(r.hour).padStart(2,'0')}:${String(r.minute).padStart(2,'0')}`).join(', ') + '</span>';
+    return `<div class="flex items-center gap-3"><span class="text-gray-300">${date}</span> ${desc} <button onclick="removeOverride('${date}')" class="text-red-500 hover:text-red-400 text-xs">删除</button></div>`;
+  }).join('');
+}
+
+// ── Calendar ───────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  initSoloRuns();
+  loadOverrides((serverConfig.solo && serverConfig.solo.date_overrides) || {});
+  loadDualEpisodes();
+  loadSoloEpisodes();
+
+  const resp = await fetch('/api/episodes?per_page=200');
+  const data = await resp.json();
+  const events = data.episodes.map(ep => ({
+    title: (ep.flow_type === 'solo' ? '📻 ' : '🎙 ') + (ep.title || ep.id).substring(0, 20),
+    date: ep.date,
+    color: ep.flow_type === 'solo' ? '#0d9488' : '#6366f1',
+    url: `/episodes/${ep.id}`,
+    extendedProps: { status: ep.status },
+  }));
+
+  const cal = new FullCalendar.Calendar(document.getElementById('calendar'), {
+    initialView: 'dayGridMonth',
+    locale: 'zh-cn',
+    headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,listMonth' },
+    events: events,
+    eventClick: (info) => { info.jsEvent.preventDefault(); window.location.href = info.event.url; },
+    height: 420,
+    themeSystem: 'standard',
+  });
+  cal.render();
+});
+
+// ── Save config ────────────────────────────────────────
+async function saveConfig() {
+  const saveBtn = document.getElementById('saveBtn');
+  const saveStatus = document.getElementById('saveStatus');
+  saveBtn.disabled = true;
+  saveStatus.textContent = '保存中...';
+
+  const dailyRuns = getSoloDailyRuns();
+  const config = {
+    dual_host: {
+      enabled: document.getElementById('dual_host_enabled').checked,
+      days_of_week: getSelectedDays('dual_host'),
+      hour: parseInt(document.getElementById('dual_host_hour').value),
+      minute: parseInt(document.getElementById('dual_host_minute').value),
+      publish_day_offset: parseInt(document.getElementById('dual_host_publish_day_offset').value),
+      publish_hour: parseInt(document.getElementById('dual_host_pub_hour').value),
+      publish_minute: parseInt(document.getElementById('dual_host_pub_minute').value),
+    },
+    solo: {
+      enabled: document.getElementById('solo_enabled').checked,
+      days_of_week: getSelectedDays('solo'),
+      hour: dailyRuns[0]?.hour || 4,
+      minute: dailyRuns[0]?.minute || 0,
+      daily_runs: dailyRuns,
+      publish_hour: parseInt(document.getElementById('solo_pub_hour').value),
+      publish_minute: parseInt(document.getElementById('solo_pub_minute').value),
+    }
+  };
+
+  try {
+    const resp = await fetch('/admin/schedule', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(config),
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      saveStatus.textContent = '已保存，launchd 已更新';
+      setTimeout(() => saveStatus.textContent = '', 3000);
+    } else {
+      saveStatus.textContent = '保存失败: ' + (result.error || 'unknown');
+    }
+  } catch(e) {
+    saveStatus.textContent = '网络错误: ' + e.message;
+  }
+  saveBtn.disabled = false;
+}
+
+// ── Trigger pipeline ───────────────────────────────────
+async function triggerPipeline(flow) {
+  const statusEl = document.getElementById(`${flow}_status`);
+  statusEl.textContent = '启动中...';
+  try {
+    const resp = await fetch('/admin/pipeline/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({flow}),
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      statusEl.textContent = `运行中 (pid=${result.pid})`;
+      startLogs(flow);
+    } else {
+      statusEl.textContent = result.error || '启动失败';
+    }
+  } catch(e) {
+    statusEl.textContent = '错误: ' + e.message;
+  }
+}
+
+// ── Dual host episode management ──────────────────────
+async function loadDualEpisodes() {
+  const container = document.getElementById('dualEpisodesList');
+  container.innerHTML = '<p class="text-gray-600 text-xs">加载中...</p>';
+  try {
+    const resp = await fetch('/api/episodes?flow_type=dual_host&per_page=15');
+    const data = await resp.json();
+    renderDualEpisodes(data.episodes || []);
+  } catch(e) {
+    container.innerHTML = `<p class="text-red-500 text-xs">加载失败: ${e.message}</p>`;
+  }
+}
+
+function renderDualEpisodes(episodes) {
+  const container = document.getElementById('dualEpisodesList');
+  if (!episodes.length) {
+    container.innerHTML = '<p class="text-gray-600 text-xs">暂无双人口播节目</p>';
+    return;
+  }
+  const DUAL_STATUS_LABELS = {
+    published: '✓ 已发布',
+    pending_confirmation: '◉ 待发布',
+    audio_ready: '◉ 待发布',
+    publishing: '↑ 发布中',
+    draft_ready: '○ 草稿',
+    draft: '○ 草稿',
+  };
+  const DUAL_STATUS_COLORS = {
+    published: 'text-green-400',
+    pending_confirmation: 'text-indigo-400',
+    audio_ready: 'text-indigo-400',
+    publishing: 'text-purple-400',
+    draft_ready: 'text-gray-500',
+    draft: 'text-gray-500',
+  };
+  container.innerHTML = episodes.map(ep => {
+    const status = ep.status || 'draft';
+    const label = DUAL_STATUS_LABELS[status] || status;
+    const color = DUAL_STATUS_COLORS[status] || 'text-gray-500';
+    const isPublished = status === 'published';
+    const hasAudio = !!ep.audio_url;
+    const title = (ep.title || ep.id).substring(0, 32);
+    return `
+    <div class="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-gray-800/60 rounded-xl border border-gray-700/50 hover:border-gray-600 transition-colors">
+      <div class="flex-1 min-w-0">
+        <span class="text-gray-300 text-xs font-mono mr-2">${ep.date || ep.id.substring(0,8)}</span>
+        <span class="text-white text-xs truncate">${title}</span>
+      </div>
+      <span class="text-xs ${color} shrink-0">${label}</span>
+      <div class="flex gap-1.5 flex-wrap">
+        <button onclick="dualEpAction('${ep.id}','download',this)"
+          class="ep-btn bg-cyan-900/50 border-cyan-700 text-cyan-300 hover:bg-cyan-900">下载单集</button>
+        <button onclick="dualEpAction('${ep.id}','cover-title',this)"
+          class="ep-btn bg-purple-900/50 border-purple-700 text-purple-300 hover:bg-purple-900">封面标题</button>
+        <button onclick="dualEpAction('${ep.id}','publish',this)"
+          ${isPublished ? 'disabled' : ''}
+          class="ep-btn ${isPublished ? 'opacity-40 cursor-not-allowed bg-gray-800 border-gray-700 text-gray-500' : 'bg-indigo-900/50 border-indigo-700 text-indigo-300 hover:bg-indigo-900'}">立即发布</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function dualEpAction(episodeId, action, btn) {
+  const prevText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  try {
+    if (action === 'download') {
+      const resp = await fetch(`/admin/dual-episodes/${episodeId}/download-listenhub`, {method:'POST'});
+      const d = await resp.json();
+      if (d.ok) { btn.textContent = '下载中'; openDualEpLog(episodeId, 'dual_download', `下载单集 · ${episodeId}`); }
+      else { alert(d.error || '下载失败'); btn.textContent = prevText; btn.disabled = false; }
+
+    } else if (action === 'cover-title') {
+      const resp = await fetch(`/admin/dual-episodes/${episodeId}/generate-cover-title`, {method:'POST'});
+      const d = await resp.json();
+      if (d.ok) { btn.textContent = '生成中'; openDualEpLog(episodeId, 'dual_cover_title', `封面标题 · ${episodeId}`); }
+      else { alert(d.error || '生成失败'); btn.textContent = prevText; btn.disabled = false; }
+
+    } else if (action === 'publish') {
+      if (!confirm(`确认立即发布 ${episodeId} 到小宇宙？\n将走双人口播发布链路，默认次日 07:00 发布。`)) {
+        btn.textContent = prevText; btn.disabled = false; return;
+      }
+      const resp = await fetch(`/admin/dual-episodes/${episodeId}/publish`, {method:'POST'});
+      const d = await resp.json();
+      if (d.ok) { btn.textContent = '发布中'; btn.classList.add('opacity-60'); }
+      else { alert(d.error || '发布失败'); btn.textContent = prevText; btn.disabled = false; }
+    }
+  } catch(e) {
+    alert('网络错误: ' + e.message);
+    btn.textContent = prevText;
+    btn.disabled = false;
+  }
+}
+
+// ── Dual per-episode log panel ─────────────────────────
+let dualEpLogEventSource = null;
+
+function openDualEpLog(episodeId, opName, title) {
+  if (dualEpLogEventSource) dualEpLogEventSource.close();
+  const container = document.getElementById('dualEpLogContainer');
+  const box = document.getElementById('dualEpLogBox');
+  const label = document.getElementById('dualEpLogTitle');
+  container.classList.remove('hidden');
+  label.textContent = title;
+  box.textContent = '[连接日志...]\n';
+  dualEpLogEventSource = new EventSource(`/admin/pipeline/logs/episode/${episodeId}/${opName}`);
+  dualEpLogEventSource.onmessage = (e) => {
+    box.textContent += e.data + '\n';
+    box.scrollTop = box.scrollHeight;
+  };
+  dualEpLogEventSource.onerror = () => {
+    box.textContent += '\n[日志流已断开]\n';
+    dualEpLogEventSource.close();
+  };
+}
+
+function closeDualEpLog() {
+  if (dualEpLogEventSource) { dualEpLogEventSource.close(); dualEpLogEventSource = null; }
+  document.getElementById('dualEpLogContainer').classList.add('hidden');
+}
+
+// ── Solo episode management ────────────────────────────
+const STATUS_LABELS = {
+  published: '✓ 已发布',
+  pending_confirmation: '◉ 待发布',
+  audio_ready: '◉ 待发布',
+  draft_ready: '○ 待TTS',
+  cover_retry_pending: '⚠ 封面重试中',
+  publishing: '↑ 发布中',
+  draft: '○ 草稿',
+};
+const STATUS_COLORS = {
+  published: 'text-green-400',
+  pending_confirmation: 'text-teal-400',
+  audio_ready: 'text-teal-400',
+  draft_ready: 'text-amber-400',
+  cover_retry_pending: 'text-orange-400',
+  publishing: 'text-indigo-400',
+  draft: 'text-gray-500',
+};
+
+async function loadSoloEpisodes() {
+  const container = document.getElementById('soloEpisodesList');
+  container.innerHTML = '<p class="text-gray-600 text-xs">加载中...</p>';
+  try {
+    const resp = await fetch('/api/episodes?flow_type=solo&per_page=15');
+    const data = await resp.json();
+    renderSoloEpisodes(data.episodes || []);
+  } catch(e) {
+    container.innerHTML = `<p class="text-red-500 text-xs">加载失败: ${e.message}</p>`;
+  }
+}
+
+function renderSoloEpisodes(episodes) {
+  const container = document.getElementById('soloEpisodesList');
+  if (!episodes.length) {
+    container.innerHTML = '<p class="text-gray-600 text-xs">暂无单人口播节目</p>';
+    return;
+  }
+  container.innerHTML = episodes.map(ep => {
+    const status = ep.status || 'draft';
+    const label = STATUS_LABELS[status] || status;
+    const color = STATUS_COLORS[status] || 'text-gray-500';
+    const hasAudio = !!ep.audio_url;
+    const isPublished = status === 'published';
+    const title = (ep.title || ep.id).substring(0, 32);
+    return `
+    <div class="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-gray-800/60 rounded-xl border border-gray-700/50 hover:border-gray-600 transition-colors">
+      <div class="flex-1 min-w-0">
+        <span class="text-gray-300 text-xs font-mono mr-2">${ep.date || ep.id.substring(0,8)}</span>
+        <span class="text-white text-xs truncate">${title}</span>
+      </div>
+      <span class="text-xs ${color} shrink-0">${label}</span>
+      <div class="flex gap-1.5 flex-wrap">
+        <button onclick="epAction('${ep.id}','tts',this)" class="ep-btn bg-teal-900/50 border-teal-700 text-teal-300 hover:bg-teal-900">合成TTS</button>
+        <button onclick="epAction('${ep.id}','publish',this)" ${isPublished ? 'disabled' : ''} class="ep-btn ${isPublished ? 'opacity-40 cursor-not-allowed bg-gray-800 border-gray-700 text-gray-500' : 'bg-indigo-900/50 border-indigo-700 text-indigo-300 hover:bg-indigo-900'}">立即发布</button>
+        <button onclick="epAction('${ep.id}','cover-title',this)" class="ep-btn bg-purple-900/50 border-purple-700 text-purple-300 hover:bg-purple-900">封面标题</button>
+        <button onclick="epAction('${ep.id}','shownotes',this)" ${!hasAudio ? 'disabled title="需先合成TTS"' : ''} class="ep-btn ${!hasAudio ? 'opacity-40 cursor-not-allowed bg-gray-800 border-gray-700 text-gray-500' : 'bg-amber-900/50 border-amber-700 text-amber-300 hover:bg-amber-900'}">更新Shownotes</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function epAction(episodeId, action, btn) {
+  const prevText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  try {
+    if (action === 'tts') {
+      const resp = await fetch(`/admin/episodes/${episodeId}/synthesize-tts`, {method:'POST'});
+      const d = await resp.json();
+      if (d.ok) { btn.textContent = '已提交'; openEpLog(episodeId, 'synthesize_tts', `TTS合成 · ${episodeId}`); }
+      else { alert(d.error || 'TTS失败'); btn.textContent = prevText; btn.disabled = false; }
+
+    } else if (action === 'publish') {
+      if (!confirm(`确认立即发布 ${episodeId} 到小宇宙？\n将使用后台调度配置的预约发布时间。`)) {
+        btn.textContent = prevText; btn.disabled = false; return;
+      }
+      const resp = await fetch(`/admin/episodes/${episodeId}/publish`, {method:'POST'});
+      const d = await resp.json();
+      if (d.ok) { btn.textContent = '发布中'; btn.classList.add('opacity-60'); }
+      else { alert(d.error || '发布失败'); btn.textContent = prevText; btn.disabled = false; }
+
+    } else if (action === 'cover-title') {
+      const checkResp = await fetch(`/admin/episodes/${episodeId}/generate-cover-title`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force: false})
+      });
+      const checkD = await checkResp.json();
+      if (checkD.exists) {
+        const parts = [];
+        if (checkD.title) parts.push(`标题: ${checkD.title.substring(0,30)}`);
+        if (checkD.cover) parts.push('封面: 已存在');
+        const msg = `该节目已有 ${parts.join('，')}。\n是否强制覆盖重新生成？`;
+        if (!confirm(msg)) { btn.textContent = prevText; btn.disabled = false; return; }
+        const resp2 = await fetch(`/admin/episodes/${episodeId}/generate-cover-title`, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force: true})
+        });
+        const d2 = await resp2.json();
+        if (d2.ok) { btn.textContent = '生成中'; openEpLog(episodeId, 'gen_cover_title', `封面标题 · ${episodeId}`); }
+        else { alert(d2.error || '失败'); btn.textContent = prevText; btn.disabled = false; }
+      } else if (checkD.ok) {
+        btn.textContent = '生成中';
+        openEpLog(episodeId, 'gen_cover_title', `封面标题 · ${episodeId}`);
+      } else {
+        alert(checkD.error || '请求失败');
+        btn.textContent = prevText; btn.disabled = false;
+      }
+
+    } else if (action === 'shownotes') {
+      const resp = await fetch(`/admin/episodes/${episodeId}/generate-shownotes`, {method:'POST'});
+      const d = await resp.json();
+      if (d.ok) {
+        btn.textContent = '更新中';
+        btn.classList.add('opacity-70');
+        openEpLog(episodeId, 'regen_shownotes', `Shownotes · ${episodeId}`, {
+          button: btn,
+          runningText: '更新中',
+          successText: '已覆盖',
+          failureText: '更新失败',
+        });
+      }
+      else { alert(d.error || '失败'); btn.textContent = prevText; btn.disabled = false; }
+    }
+  } catch(e) {
+    alert('网络错误: ' + e.message);
+    btn.textContent = prevText;
+    btn.disabled = false;
+  }
+}
+
+// ── Per-episode log panel ──────────────────────────────
+let epLogEventSource = null;
+
+function openEpLog(episodeId, opName, title, opts = {}) {
+  if (epLogEventSource) epLogEventSource.close();
+  const container = document.getElementById('epLogContainer');
+  const box = document.getElementById('epLogBox');
+  const label = document.getElementById('epLogTitle');
+  let finished = false;
+  container.classList.remove('hidden');
+  label.textContent = title;
+  box.textContent = '[连接日志...]\n';
+  epLogEventSource = new EventSource(`/admin/pipeline/logs/episode/${episodeId}/${opName}`);
+  epLogEventSource.onmessage = (e) => {
+    box.textContent += e.data + '\n';
+    box.scrollTop = box.scrollHeight;
+    if (e.data.includes(`[webapp] ${opName} ${episodeId} finished rc=0`)) {
+      finished = true;
+      if (opts.button) {
+        opts.button.textContent = opts.successText || '已完成';
+        opts.button.disabled = false;
+        opts.button.classList.remove('opacity-70');
+      }
+    } else if (e.data.includes(`[webapp] ${opName} ${episodeId} finished rc=`)) {
+      finished = true;
+      if (opts.button) {
+        opts.button.textContent = opts.failureText || '失败';
+        opts.button.disabled = false;
+        opts.button.classList.remove('opacity-70');
+      }
+    }
+  };
+  epLogEventSource.onerror = () => {
+    box.textContent += '\n[日志流已断开]\n';
+    if (!finished && opts.button) {
+      opts.button.textContent = opts.runningText || opts.button.textContent;
+      opts.button.disabled = true;
+      opts.button.classList.add('opacity-70');
+    }
+    epLogEventSource.close();
+  };
+}
+
+function closeEpLog() {
+  if (epLogEventSource) { epLogEventSource.close(); epLogEventSource = null; }
+  document.getElementById('epLogContainer').classList.add('hidden');
+}
+
+// ── Log streaming ──────────────────────────────────────
+let currentEventSource = null;
+
+function startLogs(flow) {
+  if (currentEventSource) currentEventSource.close();
+  const logBox = document.getElementById('logBox');
+  logBox.textContent = `[连接 ${flow} 日志...]\n`;
+
+  currentEventSource = new EventSource(`/admin/pipeline/logs/${flow}`);
+  currentEventSource.onmessage = (e) => {
+    logBox.textContent += e.data + '\n';
+    logBox.scrollTop = logBox.scrollHeight;
+  };
+  currentEventSource.onerror = () => {
+    logBox.textContent += '\n[日志流已断开]\n';
+    currentEventSource.close();
+  };
+}
+</script>
+{% endblock %}

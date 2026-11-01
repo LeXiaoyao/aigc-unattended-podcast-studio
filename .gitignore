@@ -1,0 +1,107 @@
+# === 敏感信息：API keys / auth tokens（绝对不能上 GitHub）===
+.env
+.env.*
+*.env
+!.env.example
+.xiaoyuzhou_auth.json*
+.xiaoyuzhou_*session*.json
+.xiaoyuzhou_login_block.json
+.xiaoyuzhou_login_recovered.json
+*_auth.json
+*_credentials.json
+*.key
+*.pem
+*.p12
+.playwright_gemini_profile/
+
+# === 本地状态文件（大且每天变动）===
+.coverage_index.json
+.news_backlog.jsonl
+.daily_search_cache/
+.listenhub_pending_download.json*
+.listenhub-download.lock/
+.swift_module_cache/
+content_records.csv
+db/*.db
+db/*.db-wal
+db/*.db-shm
+podcast.db
+
+# === 内部方法论文档与已停摆周长文项目（不开源）===
+docs/
+weekly/
+weekly_longform/
+tools/weekly_longform/
+tools/weekly_tts_chunked.py
+prepare_tts_script.py
+install_listenhub_launch_agent.sh
+gen_covers_batch.py
+
+# === 本地 LaunchAgents 与个人配置/历史测试快照 ===
+*.plist
+automation/archived_launchagents/
+launchd/*.plist
+shared/config/schedule_config.local.json
+github_newstars_test_*.json
+hf_provider_test_*.json
+tools/_resume_*.py
+tools/ai_news_pipeline_*_backup.py
+tools/ai_news_pipeline_experimental_*.py
+tools/competitor_radar/reports/
+tools/solo_review/*_news_review.*
+validation/shownotes_review/
+
+# === 产物：期目录和日志 ===
+outputs/
+episodes/
+rss.xml
+20*/
+!/20*.md
+logs/
+*.log
+tools/solo_review/*_news_review.*
+
+# === 本地素材/数据/独立仓库（不入版本库）===
+podcast-site/
+小宇宙后台数据/
+assets/
+output/
+news_pipeline_rules.json.bak.*
+AI观测站.jpeg
+ai_artwork_1.png
+
+# === 临时/一次性文件 ===
+tmp/
+.tmp_*
+*.tmp
+.resume_project_summary*
+_resume_project_summary*
+.xiaohongshu_share*
+.claude/
+*_search.json
+*_search_results.json
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.venv_*/
+*.egg-info/
+
+# === macOS / IDE ===
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# === 备份目录（可选：如果你想版本化备份，删掉这一行）===
+backups/
+
+# 京东CPS 全目录本地维护不入库（cookies 含账号会话；入驻手册 pdf、图书短链维护表 numbers 均为工作文件）
+京东CPS/
+
+# codex automation prompt 改动前备份（只留本地，不 commit）
+automation_prompt_backups/

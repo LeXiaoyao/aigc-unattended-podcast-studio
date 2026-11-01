@@ -1,0 +1,268 @@
+#!/usr/bin/osascript -l JavaScript
+
+ObjC.import("stdlib");
+
+function sleep(seconds) {
+  delay(seconds);
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function chrome() {
+  const app = Application("com.google.Chrome");
+  app.includeStandardAdditions = true;
+  return app;
+}
+
+function ensureChromeWindow(app) {
+  if (!app.running()) {
+    app.activate();
+    sleep(2);
+  }
+  const windows = app.windows();
+  if (windows.length > 0) {
+    return windows[0];
+  }
+  Application.currentApplication().doShellScript('open -a "Google Chrome"');
+  sleep(2);
+  return app.windows()[0];
+}
+
+function activeTab(win) {
+  return win.activeTab();
+}
+
+function runJs(tab, source) {
+  const result = tab.execute({ javascript: source });
+  if (result === undefined || result === null) {
+    return "";
+  }
+  return String(result);
+}
+
+function openUrl(tab, url) {
+  tab.url = url;
+}
+
+function waitFor(description, timeoutSeconds, fn) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = fn();
+    if (result) {
+      return result;
+    }
+    sleep(1);
+  }
+  throw new Error("Timed out waiting for " + description);
+}
+
+function setTextareaValue(tab, text) {
+  const escaped = JSON.stringify(text);
+  return runJs(
+    tab,
+    `
+      (() => {
+        const textarea = document.querySelector('textarea');
+        if (!textarea) return 'false';
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+        nativeInputValueSetter.call(textarea, ${escaped});
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function clickButtonByText(tab, text) {
+  const escaped = JSON.stringify(text);
+  return runJs(
+    tab,
+    `
+      (() => {
+        const visible = (node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const fireClick = (el) => {
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          if (typeof el.click === 'function') {
+            try { el.click(); } catch (e) {}
+          }
+        };
+        const candidates = [...document.querySelectorAll('button, [role="option"], [role="menuitem"], div, span')]
+          .filter(visible)
+          .filter((node) => (node.textContent || '').trim().includes(${escaped}))
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (ar.top - br.top) || (ar.left - br.left);
+          });
+        if (!candidates.length) return 'false';
+        const node = candidates[0].closest('button, [role="option"], [role="menuitem"]') || candidates[0];
+        fireClick(node);
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function clickSubmit(tab) {
+  return runJs(
+    tab,
+    `
+      (() => {
+        const visible = (node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const fireClick = (el) => {
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          if (typeof el.click === 'function') {
+            try { el.click(); } catch (e) {}
+          }
+        };
+        const buttons = [...document.querySelectorAll('button')]
+          .filter(visible)
+          .filter((node) => node.type === 'submit' || node.getAttribute('type') === 'submit')
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (ar.top - br.top) || (ar.left - br.left);
+          });
+        const target = buttons[buttons.length - 1];
+        if (!target) return 'false';
+        fireClick(target);
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function currentLocation(tab) {
+  return runJs(tab, "location.href");
+}
+
+function currentTitle(tab) {
+  return runJs(tab, "document.querySelector('h1')?.textContent?.trim() || document.title || ''");
+}
+
+function createPodcast(url, style, language, voices, scriptText) {
+  const app = chrome();
+  const win = ensureChromeWindow(app);
+  const tab = activeTab(win);
+  openUrl(tab, url);
+
+  waitFor("podcast page", 30, () => {
+    const href = currentLocation(tab);
+    return href.includes("/app/podcast") ? href : "";
+  });
+
+  waitFor("textarea", 30, () =>
+    runJs(tab, "document.querySelector('textarea') ? 'ok' : ''")
+  );
+
+  if (!setTextareaValue(tab, scriptText)) {
+    throw new Error("Could not fill textarea");
+  }
+
+  clickButtonByText(tab, style);
+  sleep(0.5);
+  clickButtonByText(tab, style);
+
+  clickButtonByText(tab, language);
+  sleep(0.5);
+  clickButtonByText(tab, language);
+
+  clickButtonByText(tab, voices);
+  sleep(0.8);
+  clickButtonByText(tab, voices);
+
+  const before = currentLocation(tab);
+  if (!clickSubmit(tab)) {
+    throw new Error("Could not click submit button");
+  }
+
+  const episodeUrl = waitFor("episode page after creation", 240, () => {
+    const href = currentLocation(tab);
+    return href !== before && href.includes("/app/episode/") ? href : "";
+  });
+
+  sleep(2);
+  return {
+    episodeUrl: episodeUrl,
+    pageTitle: currentTitle(tab),
+    voices: voices,
+    style: style,
+    language: language
+  };
+}
+
+function printUsage() {
+  console.log("Usage: listenhub_create_podcast.jxa create <podcast_url> <style> <language> <voices> <script_text>");
+}
+
+function cliArgs() {
+  const raw = ObjC.deepUnwrap($.NSProcessInfo.processInfo.arguments) || [];
+  const args = raw.map((item) => String(ObjC.unwrap(item)));
+  const scriptIndex = args.findIndex((item) => item.endsWith(".jxa"));
+  if (scriptIndex >= 0) {
+    return args.slice(scriptIndex + 1);
+  }
+  const evalIndex = args.findIndex((item) => item === "-e");
+  if (evalIndex >= 0) {
+    return args.slice(evalIndex + 2);
+  }
+  return args.slice(1);
+}
+
+function run(argv) {
+  try {
+    if (argv.length < 6) {
+      printUsage();
+      return;
+    }
+    const action = argv[0];
+    if (action !== "create") {
+      printUsage();
+      return;
+    }
+    const podcastUrl = argv[1];
+    const style = argv[2];
+    const language = argv[3];
+    const voices = argv[4];
+    const scriptText = argv.slice(5).join(" ");
+    console.log(JSON.stringify(createPodcast(podcastUrl, style, language, voices, scriptText)));
+  } catch (error) {
+    console.log(JSON.stringify({ error: String(error) }));
+    $.exit(1);
+  }
+}
+
+run(cliArgs());

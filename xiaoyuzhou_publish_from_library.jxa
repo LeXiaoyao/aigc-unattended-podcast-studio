@@ -1,0 +1,405 @@
+#!/usr/bin/osascript -l JavaScript
+
+ObjC.import("stdlib");
+
+function sleep(seconds) {
+  delay(seconds);
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function chrome() {
+  const app = Application("com.google.Chrome");
+  app.includeStandardAdditions = true;
+  return app;
+}
+
+function ensureChromeWindow(app) {
+  if (!app.running()) {
+    app.activate();
+    sleep(2);
+  }
+  const windows = app.windows();
+  if (windows.length > 0) {
+    return windows[0];
+  }
+  Application.currentApplication().doShellScript('open -a "Google Chrome"');
+  sleep(2);
+  if (app.windows().length === 0) {
+    throw new Error("Google Chrome 没有可用窗口，请先打开 Chrome");
+  }
+  return app.windows()[0];
+}
+
+function activeTab(win) {
+  return win.activeTab();
+}
+
+function runJs(tab, source) {
+  const result = tab.execute({ javascript: source });
+  if (result === undefined || result === null) {
+    return "";
+  }
+  return String(result);
+}
+
+function openUrl(tab, url) {
+  tab.url = url;
+}
+
+function currentLocation(tab) {
+  return runJs(tab, "location.href");
+}
+
+function waitFor(description, timeoutSeconds, fn) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = fn();
+    if (result) {
+      return result;
+    }
+    sleep(1);
+  }
+  throw new Error("Timed out waiting for " + description);
+}
+
+function clickResourceMenu(tab, resourceTitle) {
+  const escaped = JSON.stringify(resourceTitle);
+  return runJs(
+    tab,
+    `
+      (() => {
+        const normalize = (value) => (value || '').replace(/\\s+/g, '').trim();
+        const targetText = normalize(${escaped});
+        const targetKeywords = targetText
+          .split(/[：:，,、\\-]/)
+          .map((item) => normalize(item))
+          .filter((item) => item.length >= 6);
+        const targetPrefix = targetText.slice(0, 12);
+
+        const visible = (node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+
+        const fireClick = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          if (typeof el.click === 'function') {
+            try { el.click(); } catch (e) {}
+          }
+          return true;
+        };
+
+        const titleNodes = [...document.querySelectorAll('div, span, p, h1, h2, h3')]
+          .filter(visible)
+          .filter((node) => {
+            const text = normalize(node.textContent || '');
+            if (!text) return false;
+            return (
+              text.includes(targetText) ||
+              targetText.includes(text) ||
+              text.startsWith(targetPrefix) ||
+              targetText.startsWith(text.slice(0, 8)) ||
+              targetKeywords.some((keyword) => text.includes(keyword))
+            );
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (ar.top - br.top) || (ar.left - br.left);
+          });
+
+        const titleNode = titleNodes[0];
+        if (!titleNode) return 'false';
+
+        const container = titleNode.closest('div[role], li, article, section, div') || titleNode.parentElement;
+        if (!container) return 'false';
+
+        const candidates = [...container.querySelectorAll('button, div, span')]
+          .filter(visible)
+          .filter((node) => {
+            const text = (node.textContent || '').trim();
+            const rect = node.getBoundingClientRect();
+            return (
+              text === '...' ||
+              text === '⋯' ||
+              text === '…' ||
+              (
+                rect.width <= 48 &&
+                rect.height <= 48 &&
+                rect.right > titleNode.getBoundingClientRect().right + 80 &&
+                Math.abs(rect.top - titleNode.getBoundingClientRect().top) < 120
+              )
+            );
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return br.right - ar.right;
+          });
+
+        let menu = candidates[0];
+        if (!menu) {
+          const rect = container.getBoundingClientRect();
+          const x = rect.right - 36;
+          const y = rect.top + rect.height / 2;
+          const hits = (document.elementsFromPoint(x, y) || []).filter(visible);
+          menu = hits[0] || null;
+        }
+        if (!menu) return 'false';
+        fireClick(menu.closest('button') || menu);
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function clickText(tab, text) {
+  const escaped = JSON.stringify(text);
+  return runJs(
+    tab,
+    `
+      (() => {
+        const visible = (node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+
+        const fireClick = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          if (typeof el.click === 'function') {
+            try { el.click(); } catch (e) {}
+          }
+          return true;
+        };
+
+        const nodes = [...document.querySelectorAll('button, div, span, a')]
+          .filter(visible)
+          .filter((node) => (node.textContent || '').includes(${escaped}))
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (ar.top - br.top) || (ar.left - br.left);
+          });
+        if (!nodes.length) return 'false';
+        const node = nodes[0].closest('button, a') || nodes[0];
+        fireClick(node);
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function clickFirstContextMenuItem(tab) {
+  return runJs(
+    tab,
+    `
+      (() => {
+        const visible = (node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+
+        const fireClick = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          if (typeof el.click === 'function') {
+            try { el.click(); } catch (e) {}
+          }
+          return true;
+        };
+
+        const candidates = [...document.querySelectorAll('button, div, span, a, li')]
+          .filter(visible)
+          .filter((node) => {
+            const rect = node.getBoundingClientRect();
+            const text = (node.textContent || '').trim();
+            return rect.width > 80 && rect.height > 20 && rect.width < 260 && rect.top > 0 && text;
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (ar.top - br.top) || (ar.left - br.left);
+          });
+
+        const publishLike = candidates.find((node) => {
+          const text = (node.textContent || '').trim();
+          return text.includes('作为单集发布') || text.includes('发布');
+        });
+        const target = publishLike || candidates[0];
+        if (!target) return 'false';
+        fireClick(target.closest('button, a, li') || target);
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function clickPrimarySubmit(tab) {
+  return runJs(
+    tab,
+    `
+      (() => {
+        const visible = (node) => {
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const fireClick = (el) => {
+          const rect = el.getBoundingClientRect();
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          };
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+            el.dispatchEvent(new MouseEvent(type, options));
+          });
+          if (typeof el.click === 'function') {
+            try { el.click(); } catch (e) {}
+          }
+        };
+        const buttons = [...document.querySelectorAll('button')]
+          .filter(visible)
+          .filter((node) => {
+            const text = (node.textContent || '').trim();
+            return text.includes('创建') || text.includes('更新');
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return (br.top - ar.top) || (br.left - ar.left);
+          });
+        if (!buttons.length) return 'false';
+        fireClick(buttons[0]);
+        return 'true';
+      })()
+    `
+  ) === "true";
+}
+
+function currentTitle(tab) {
+  return runJs(tab, "document.querySelector('h1')?.textContent?.trim() || document.title || ''");
+}
+
+function publishFromLibrary(libraryUrl, resourceTitle, submitNow) {
+  const app = chrome();
+  const win = ensureChromeWindow(app);
+  const tab = activeTab(win);
+  openUrl(tab, libraryUrl);
+
+  waitFor("resource library page", 30, () => {
+    const href = currentLocation(tab);
+    return href.includes("/library") ? href : "";
+  });
+
+  waitFor("resource card", 30, () => {
+    return clickResourceMenu(tab, resourceTitle) ? "ok" : "";
+  });
+
+  waitFor("publish menu item", 15, () => {
+    if (clickText(tab, "作为单集发布")) {
+      return "ok";
+    }
+    if (clickFirstContextMenuItem(tab)) {
+      return "ok";
+    }
+    return "";
+  });
+
+  const createUrl = waitFor("create episode page", 30, () => {
+    const href = currentLocation(tab);
+    return href.includes("/create/episode") ? href : "";
+  });
+
+  sleep(2);
+
+  if (!submitNow) {
+    return {
+      mode: "prepared",
+      createUrl: createUrl,
+      pageTitle: currentTitle(tab),
+      resourceTitle: resourceTitle
+    };
+  }
+
+  if (!clickPrimarySubmit(tab)) {
+    throw new Error("Could not click create/update button");
+  }
+
+  const finalUrl = waitFor("episode edit page", 60, () => {
+    const href = currentLocation(tab);
+    return href.includes("/episode") && !href.includes("/create/episode") ? href : "";
+  });
+
+  return {
+    mode: "submitted",
+    finalUrl: finalUrl,
+    pageTitle: currentTitle(tab),
+    resourceTitle: resourceTitle
+  };
+}
+
+function printUsage() {
+  console.log("Usage: xiaoyuzhou_publish_from_library.jxa publish <library_url> <resource_title> <submit_now:true|false>");
+}
+
+function run(argv) {
+  try {
+    if (argv.length < 4 || argv[0] !== "publish") {
+      printUsage();
+      return;
+    }
+    const libraryUrl = argv[1];
+    const resourceTitle = argv[2];
+    const submitNow = argv[3] === "true";
+    const result = publishFromLibrary(libraryUrl, resourceTitle, submitNow);
+    console.log(JSON.stringify(result));
+  } catch (error) {
+    console.log(JSON.stringify({ error: String(error) }));
+    $.exit(1);
+  }
+}

@@ -1,0 +1,619 @@
+#!/usr/bin/osascript -l JavaScript
+
+ObjC.import("stdlib");
+ObjC.import("Foundation");
+
+function sleep(seconds) {
+  delay(seconds);
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function chrome() {
+  const candidates = ["Google Chrome", "com.google.Chrome", "/Applications/Google Chrome.app"];
+  for (const candidate of candidates) {
+    try {
+      const app = Application(candidate);
+      app.includeStandardAdditions = true;
+      app.name();
+      return app;
+    } catch (error) {}
+  }
+  throw new Error("Google Chrome 应用未找到");
+}
+
+function ensureChromeWindow(app) {
+  if (!app.running()) {
+    app.activate();
+    sleep(2);
+  }
+  const windows = app.windows();
+  if (windows.length > 0) {
+    return windows[0];
+  }
+  Application.currentApplication().doShellScript('open -a "Google Chrome"');
+  sleep(2);
+  if (app.windows().length === 0) {
+    throw new Error("Google Chrome 没有可用窗口，请先打开 Chrome");
+  }
+  return app.windows()[0];
+}
+
+function activeTab(win) {
+  return win.activeTab();
+}
+
+// 登录态失效时后台页会 302 到 accounts.xiaoyuzhoufm.com/login，这类 tab 既不是可用的
+// 后台页，也必须能被本流程回收——否则每次定时任务都新开一个，几天就堆出几十个页签。
+const LOGIN_REQUIRED_MARKER = "XYZ_LOGIN_REQUIRED";
+
+function isPodcasterUrl(href) {
+  return href.indexOf("https://podcaster.xiaoyuzhoufm.com") === 0;
+}
+
+function isLoginUrl(href) {
+  return href.indexOf("https://accounts.xiaoyuzhoufm.com") === 0;
+}
+
+function findTabBy(app, predicate, focus) {
+  const windows = app.windows();
+  for (let wi = 0; wi < windows.length; wi += 1) {
+    const tabs = windows[wi].tabs();
+    for (let ti = 0; ti < tabs.length; ti += 1) {
+      const tab = tabs[ti];
+      if (predicate(String(tab.url() || ""))) {
+        if (focus) {
+          windows[wi].activeTabIndex = ti + 1;
+          windows[wi].index = 1;
+        }
+        return tab;
+      }
+    }
+  }
+  return null;
+}
+
+function findPodcasterTab(app) {
+  return findTabBy(app, isPodcasterUrl, true);
+}
+
+function findLoginTab(app) {
+  // 登录页只用于判定"需人工重登"，不抢焦点
+  return findTabBy(app, isLoginUrl, false);
+}
+
+function runJs(tab, source) {
+  const result = tab.execute({ javascript: source });
+  if (result === undefined || result === null) {
+    return "";
+  }
+  return String(result);
+}
+
+function createPodcasterTab(app, win, url) {
+  // 登录态在 Chrome profile 里持久化，新开 tab 即自动登录，无需用户常开后台页
+  const tab = app.Tab({ url: url });
+  win.tabs.push(tab);
+  try {
+    waitFor("podcaster page load", 25, () => {
+      try {
+        if (findLoginTab(app)) {
+          // 被重定向到登录页：会话已失效，等下去也不会好，立刻收尾
+          return "login";
+        }
+        const t = findPodcasterTab(app);
+        if (!t) return null;
+        const state = runJs(t, "document.readyState");
+        return state === "complete" ? t : null;
+      } catch (error) {
+        return null;
+      }
+    });
+  } catch (error) {}
+
+  const opened = findPodcasterTab(app);
+  if (opened) {
+    return opened;
+  }
+  // 没拿到后台页：把本次开出来的这一个 tab（多半停在登录页）关掉再报错，避免日复一日堆积。
+  // 只关自己 push 的这个引用，用户手动开着的登录页不动（他可能正在输验证码）。
+  try {
+    tab.close();
+  } catch (error) {}
+  throw new Error(LOGIN_REQUIRED_MARKER + ": 小宇宙后台被重定向到登录页，需在 Chrome 手动重新登录");
+}
+
+function closeSessionTabs(app) {
+  let closed = 0;
+  const windows = app.windows();
+  for (let wi = 0; wi < windows.length; wi += 1) {
+    const win = windows[wi];
+    const tabs = win.tabs();
+    let activeIndex = 0;
+    try {
+      activeIndex = win.activeTabIndex();
+    } catch (error) {}
+    const toClose = [];
+    for (let ti = 0; ti < tabs.length; ti += 1) {
+      const href = String(tabs[ti].url() || "");
+      if (isLoginUrl(href) && ti + 1 === activeIndex) {
+        continue; // 用户正停留在登录页，可能在输验证码，别关
+      }
+      if (isPodcasterUrl(href) || isLoginUrl(href)) {
+        toClose.push(tabs[ti]);
+      }
+    }
+    for (const tab of toClose) {
+      try {
+        tab.close();
+        closed += 1;
+      } catch (error) {}
+    }
+  }
+  return closed;
+}
+
+function openUrl(tab, url) {
+  tab.url = url;
+}
+
+function waitFor(description, timeoutSeconds, fn) {
+  const started = nowMs();
+  while (nowMs() - started < timeoutSeconds * 1000) {
+    const result = fn();
+    if (result) {
+      return result;
+    }
+    sleep(1);
+  }
+  throw new Error("Timed out waiting for " + description);
+}
+
+function readTextFile(path) {
+  const ref = Ref();
+  const text = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, ref);
+  if (text.isNil()) {
+    throw new Error("读取文件失败: " + path);
+  }
+  return ObjC.unwrap(text);
+}
+
+function writeTextFile(path, text) {
+  const ref = Ref();
+  const ok = $.NSString.alloc.initWithUTF8String(text).writeToFileAtomicallyEncodingError(
+    path,
+    true,
+    $.NSUTF8StringEncoding,
+    ref
+  );
+  if (!ok) {
+    throw new Error("写入文件失败: " + path);
+  }
+}
+
+function discoverAuth(tab) {
+  const raw = runJs(
+    tab,
+    `
+      (() => {
+        const looksLikeJwt = (value) => typeof value === 'string' && value.startsWith('eyJ') && value.length > 80;
+
+        const stores = [
+          ['localStorage', window.localStorage],
+          ['sessionStorage', window.sessionStorage]
+        ];
+
+        const tryParse = (value) => {
+          try { return JSON.parse(value); } catch (e) { return null; }
+        };
+
+        const found = {
+          accessToken: '',
+          refreshToken: '',
+          buildTime: '',
+          sources: []
+        };
+
+        const remember = (kind, key, value) => {
+          if (typeof value !== 'string') return;
+          found.sources.push({ kind, key, sample: value.slice(0, 24) });
+        };
+
+        const visit = (key, value, kind = 'unknown') => {
+          const lowerKey = (key || '').toLowerCase();
+          if (!found.accessToken && (
+            (lowerKey.includes('access') && lowerKey.includes('token')) ||
+            (lowerKey.includes('jike') && lowerKey.includes('token'))
+          ) && typeof value === 'string') {
+            found.accessToken = value;
+            remember(kind, key, value);
+          }
+          if (!found.refreshToken && lowerKey.includes('refresh') && lowerKey.includes('token') && typeof value === 'string') {
+            found.refreshToken = value;
+            remember(kind, key, value);
+          }
+          if (!found.buildTime && (lowerKey.includes('build') || lowerKey.includes('app_build_time')) && typeof value === 'string') {
+            found.buildTime = value;
+          }
+
+          if (!found.accessToken && looksLikeJwt(value) && (lowerKey.includes('token') || lowerKey.includes('auth'))) {
+            found.accessToken = value;
+            remember(kind, key, value);
+          }
+          if (!found.refreshToken && looksLikeJwt(value) && lowerKey.includes('refresh')) {
+            found.refreshToken = value;
+            remember(kind, key, value);
+          }
+
+          const parsed = typeof value === 'string' ? tryParse(value) : null;
+          if (parsed && typeof parsed === 'object') {
+            Object.entries(parsed).forEach(([nestedKey, nestedValue]) => {
+              const text = typeof nestedValue === 'string' ? nestedValue : JSON.stringify(nestedValue);
+              visit(nestedKey, text, kind + ':json');
+            });
+          }
+        };
+
+        document.cookie.split(';').forEach((pair) => {
+          const idx = pair.indexOf('=');
+          if (idx <= 0) return;
+          const key = pair.slice(0, idx).trim();
+          const value = pair.slice(idx + 1).trim();
+          if (key === 'x-jike-access-token' && looksLikeJwt(value)) {
+            found.accessToken = value;
+            remember('cookie', key, value);
+          }
+          if (key === 'x-jike-refresh-token' && looksLikeJwt(value)) {
+            found.refreshToken = value;
+            remember('cookie', key, value);
+          }
+        });
+
+        for (const [, store] of stores) {
+          for (let i = 0; i < store.length; i += 1) {
+            const key = store.key(i);
+            const value = store.getItem(key);
+            visit(key, value, 'storage');
+          }
+        }
+
+        document.cookie.split(';').forEach((pair) => {
+          const idx = pair.indexOf('=');
+          if (idx <= 0) return;
+          const key = pair.slice(0, idx).trim();
+          const value = pair.slice(idx + 1).trim();
+          visit(key, value, 'cookie');
+        });
+
+        const globalKeys = Object.keys(window).filter((key) => {
+          const lower = key.toLowerCase();
+          return lower.includes('token') || lower.includes('auth') || lower.includes('user') || lower.includes('jike');
+        });
+        globalKeys.slice(0, 200).forEach((key) => {
+          let value = '';
+          try {
+            const rawValue = window[key];
+            value = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
+          } catch (e) {
+            value = '';
+          }
+          visit(key, value, 'window');
+        });
+
+        if (!found.buildTime) {
+          found.buildTime = '2026-03-16 15:05:01 +0800';
+        }
+
+        return JSON.stringify(found);
+      })()
+    `
+  );
+  return raw;
+}
+
+function getAuth(tab, pageUrl) {
+  // 新开的 tab 上 SPA 启动后才把 token 写进 localStorage（实测约 5-8 秒），
+  // 且加载中 execute 随时可能失败，所以 href 检查和 token 提取都放进轮询；
+  // 已有 tab 首轮即命中，无额外延迟
+  let auth = {};
+  let loginRequired = false;
+  try {
+    waitFor("登录 token 写入 localStorage", 25, () => {
+      let href = "";
+      try {
+        href = runJs(tab, "location.href");
+      } catch (error) {
+        return null;
+      }
+      if (isLoginUrl(href)) {
+        // 会话已失效，再 openUrl 只会被打回登录页，白等 25 秒
+        loginRequired = true;
+        return "login";
+      }
+      if (!href || !href.includes("podcaster.xiaoyuzhoufm.com")) {
+        try {
+          openUrl(tab, pageUrl);
+        } catch (error) {}
+        return null;
+      }
+      try {
+        auth = JSON.parse(discoverAuth(tab) || "{}");
+      } catch (error) {
+        return null;
+      }
+      return auth.accessToken && auth.refreshToken ? auth : null;
+    });
+  } catch (error) {}
+  if (!auth.accessToken || !auth.refreshToken) {
+    if (loginRequired) {
+      throw new Error(LOGIN_REQUIRED_MARKER + ": 小宇宙后台停在登录页，需在 Chrome 手动重新登录");
+    }
+    const samples = (auth.sources || []).slice(0, 8).map((item) => `${item.kind}:${item.key}`).join(", ");
+    throw new Error("未能从 Chrome 会话中读取小宇宙登录 token" + (samples ? `；已检查: ${samples}` : ""));
+  }
+  return {
+    accessToken: auth.accessToken,
+    refreshToken: auth.refreshToken,
+    buildTime: auth.buildTime || "2026-03-16 15:05:01 +0800",
+  };
+}
+
+function extractPidFromUrl(pageUrl) {
+  const m = String(pageUrl || "").match(/\/podcasts?\/([a-zA-Z0-9]+)/);
+  if (m && m[1]) return m[1];
+  try {
+    const envPid = ObjC.unwrap($.NSProcessInfo.processInfo.environment.objectForKey("XIAOYUZHOU_PODCAST_PID"));
+    if (envPid) return String(envPid).trim();
+  } catch (e) {}
+  return "";
+}
+
+function callApi(tab, pageUrl, method, apiUrl, payloadJson) {
+  const auth = getAuth(tab, pageUrl);
+  const pid = extractPidFromUrl(pageUrl);
+
+  const escapedMethod = JSON.stringify(method);
+  const escapedUrl = JSON.stringify(apiUrl);
+  const escapedPayload = JSON.stringify(payloadJson || "");
+  const escapedAccess = JSON.stringify(auth.accessToken);
+  const escapedRefresh = JSON.stringify(auth.refreshToken);
+  const escapedBuild = JSON.stringify(auth.buildTime);
+  const escapedPid = JSON.stringify(pid);
+  const requestId = "xyzcodex_" + nowMs();
+  const escapedRequestId = JSON.stringify(requestId);
+
+  runJs(
+    tab,
+    `
+      (() => {
+        const requestId = ${escapedRequestId};
+        window[requestId] = '';
+        const headers = {
+          'accept': 'application/json, text/plain, */*',
+          'x-app-build-time': ${escapedBuild},
+          'x-jike-access-token': ${escapedAccess},
+          'x-jike-refresh-token': ${escapedRefresh},
+          'x-pid': ${escapedPid}
+        };
+        const payloadJson = ${escapedPayload};
+        if (payloadJson) {
+          headers['content-type'] = 'application/json;charset=UTF-8';
+        }
+        fetch(${escapedUrl}, {
+          method: ${escapedMethod},
+          credentials: 'include',
+          headers,
+          body: payloadJson || undefined
+        }).then(async (response) => {
+          window[requestId] = JSON.stringify({
+            ok: response.ok,
+            status: response.status,
+            text: await response.text()
+          });
+        }).catch((error) => {
+          window[requestId] = JSON.stringify({
+            ok: false,
+            status: 0,
+            text: '',
+            error: String(error)
+          });
+        });
+        return 'pending';
+      })()
+    `
+  );
+
+  return waitFor("browser fetch", 30, () => runJs(tab, `window[${escapedRequestId}] || ""`));
+}
+
+function callApiJson(tab, pageUrl, method, apiUrl, payload) {
+  const raw = callApi(tab, pageUrl, method, apiUrl, payload ? JSON.stringify(payload) : "");
+  const response = JSON.parse(raw || "{}");
+  if (!response.ok) {
+    throw new Error(`${method} ${apiUrl} status=${response.status} body=${response.text || response.error || ""}`);
+  }
+  return JSON.parse(response.text || "{}");
+}
+
+function updateExistingEpisode(tab, pageUrl, eid, patchPath) {
+  const patch = JSON.parse(readTextFile(patchPath));
+  const getUrl = `https://podcaster-api.xiaoyuzhoufm.com/v1/episode/get?eid=${encodeURIComponent(eid)}`;
+  const current = callApiJson(tab, pageUrl, "GET", getUrl, null).data || {};
+  if (!current.eid || current.status === "DELETED" || current.status === "REMOVED") {
+    throw new Error("目标单集不存在或不可编辑: " + eid);
+  }
+  const audioFile = current.hosted && current.hosted.audioFile;
+  if (!audioFile) {
+    throw new Error("目标单集缺少 hosted.audioFile，拒绝更新以避免改动音频");
+  }
+  const payload = {
+    pid: current.pid || extractPidFromUrl(pageUrl),
+    eid,
+    title: patch.title || current.title,
+    shownotes: patch.shownotes,
+    audioFile,
+    allTrial: false
+  };
+  if (patch.pubDate) {
+    payload.pubDate = patch.pubDate;
+  }
+  if (patch.image) {
+    payload.image = patch.image;
+  }
+  const updated = callApiJson(
+    tab,
+    pageUrl,
+    "POST",
+    "https://podcaster-api.xiaoyuzhoufm.com/v1/episode/hosted/update",
+    payload
+  ).data || {};
+  return JSON.stringify({
+    ok: true,
+    eid,
+    title: updated.title || payload.title,
+    status: updated.status || "",
+    pubDate: updated.pubDate || payload.pubDate || current.pubDate || "",
+    changedImage: Boolean(patch.image),
+    shownotesHasHtml: /<(p|h[1-6]|ul|ol|li|strong)\\b/.test(patch.shownotes || ""),
+    audioKey: audioFile.key || ""
+  });
+}
+
+function printUsage() {
+  console.log("Usage: xiaoyuzhou_api_session.jxa auth <page_url> | probe [page_url] | call <page_url> <method> <api_url> [payload_json] | open <page_url>");
+}
+
+function run(argv) {
+  try {
+    if (!argv.length) {
+      printUsage();
+      return;
+    }
+
+    const app = chrome();
+
+    if (argv[0] === "close") {
+      // 关闭小宇宙后台 tab 和失效后残留的登录页 tab（发布流程结束时调用，无窗口时静默成功）
+      const closed = app.running() ? closeSessionTabs(app) : 0;
+      console.log(JSON.stringify({ ok: true, closed: closed }));
+      return;
+    }
+
+    if (argv[0] === "probe") {
+      // 只读 Chrome 里现成的后台 tab，判断登录态是否已恢复（用户人工重登后会留着登录好的页面）。
+      // 熔断解除的判据必须零副作用：不新建窗口、不新开 tab、不抢焦点——否则判断本身
+      // 又会往 Chrome 里灌登录页，正是熔断要防的事。
+      if (!app.running()) {
+        console.log(JSON.stringify({ ok: false, reason: "chrome_not_running" }));
+        return;
+      }
+      const probeUrl = argv.length >= 2 ? argv[1] : "https://podcaster.xiaoyuzhoufm.com";
+      const probeTab = findTabBy(app, isPodcasterUrl, false);
+      if (!probeTab) {
+        console.log(JSON.stringify({ ok: false, reason: findLoginTab(app) ? "login" : "no_tab" }));
+        return;
+      }
+      try {
+        const probeAuth = getAuth(probeTab, probeUrl);
+        console.log(JSON.stringify({
+          ok: true,
+          accessToken: probeAuth.accessToken,
+          refreshToken: probeAuth.refreshToken,
+          buildTime: probeAuth.buildTime,
+        }));
+      } catch (error) {
+        const message = String(error);
+        console.log(JSON.stringify({
+          ok: false,
+          reason: message.indexOf(LOGIN_REQUIRED_MARKER) >= 0 ? "login" : "no_token",
+          error: message,
+        }));
+      }
+      return;
+    }
+
+    const win = ensureChromeWindow(app);
+
+    if (argv[0] === "ensure") {
+      if (argv.length < 2) {
+        printUsage();
+        return;
+      }
+      const existing = findPodcasterTab(app);
+      if (existing) {
+        console.log(JSON.stringify({ ok: true, created: false }));
+        return;
+      }
+      const createdTab = createPodcasterTab(app, win, argv[1]);
+      if (!createdTab) {
+        throw new Error("无法打开小宇宙后台 tab: " + argv[1]);
+      }
+      console.log(JSON.stringify({ ok: true, created: true }));
+      return;
+    }
+
+    // 不再劫持用户当前活动 tab：找不到小宇宙 tab 时自动新建一个
+    const pageUrlForTab = argv.length >= 2 ? argv[1] : "https://podcaster.xiaoyuzhoufm.com";
+    const tab = findPodcasterTab(app) || createPodcasterTab(app, win, pageUrlForTab) || activeTab(win);
+
+    if (argv[0] === "auth") {
+      if (argv.length < 2) {
+        printUsage();
+        return;
+      }
+      const authJson = JSON.stringify(getAuth(tab, argv[1]));
+      if (argv.length >= 3) {
+        writeTextFile(argv[2], authJson);
+        console.log(JSON.stringify({ ok: true, path: argv[2] }));
+        return;
+      }
+      console.log(authJson);
+      return;
+    }
+
+    if (argv[0] === "open") {
+      if (argv.length < 2) {
+        printUsage();
+        return;
+      }
+      openUrl(tab, argv[1]);
+      waitFor("target page", 30, () => {
+        const href = runJs(tab, "location.href");
+        return href === argv[1] ? href : "";
+      });
+      console.log(JSON.stringify({ ok: true, opened: argv[1] }));
+      return;
+    }
+
+    if (argv[0] !== "call" || argv.length < 4) {
+      if (argv[0] === "update-existing" && argv.length >= 4) {
+        console.log(updateExistingEpisode(tab, argv[1], argv[2], argv[3]));
+        return;
+      }
+      printUsage();
+      return;
+    }
+
+    const pageUrl = argv[1];
+    const method = argv[2];
+    const apiUrl = argv[3];
+    const payloadJson = argv.length >= 5 ? argv[4] : "";
+
+    const result = callApi(tab, pageUrl, method, apiUrl, payloadJson);
+    console.log(result);
+  } catch (error) {
+    const message = String(error);
+    console.log(
+      JSON.stringify({
+        ok: false,
+        status: 0,
+        text: "",
+        error: message,
+        loginRequired: message.indexOf(LOGIN_REQUIRED_MARKER) >= 0,
+      })
+    );
+    $.exit(1);
+  }
+}

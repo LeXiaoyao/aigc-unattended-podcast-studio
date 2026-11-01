@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}AI观测站 · 播客列表{% endblock %}
+
+{% block head %}
+<script>
+async function publishEpisode(btn, episodeId) {
+  if (!confirm(`确认一键发布 ${episodeId} 到小宇宙？`)) return;
+  btn.disabled = true;
+  btn.textContent = '发布中…';
+  try {
+    const res = await fetch(`/admin/episodes/${episodeId}/publish`, {method: 'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = '已提交';
+      btn.classList.replace('bg-indigo-700', 'bg-green-700');
+    } else {
+      btn.textContent = '失败';
+      btn.classList.replace('bg-indigo-700', 'bg-red-700');
+      alert(data.error || '发布失败');
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '错误';
+    btn.disabled = false;
+    alert(String(e));
+  }
+}
+
+async function synthesizeTts(btn, episodeId) {
+  if (!confirm(`确认从 Codex 稿合成 ${episodeId} 的 TTS，并重建 shownotes？`)) return;
+  btn.disabled = true;
+  btn.textContent = '合成中…';
+  try {
+    const res = await fetch(`/admin/episodes/${episodeId}/synthesize-tts`, {method: 'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = '已提交';
+      btn.classList.remove('bg-teal-700', 'hover:bg-teal-600');
+      btn.classList.add('bg-green-700');
+    } else {
+      btn.textContent = '失败';
+      btn.classList.remove('bg-teal-700', 'hover:bg-teal-600');
+      btn.classList.add('bg-red-700');
+      alert(data.error || 'TTS 合成失败');
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '错误';
+    btn.disabled = false;
+    alert(String(e));
+  }
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<!-- Hero -->
+<div class="bg-gradient-to-br from-gray-900 via-indigo-950 to-gray-950 border-b border-gray-800">
+  <div class="max-w-6xl mx-auto px-4 py-14 flex flex-col md:flex-row items-center gap-8">
+    <div class="flex-1">
+      <h1 class="text-4xl font-bold text-white mb-3">🎙 AI观测站</h1>
+      <p class="text-lg text-gray-300 mb-4">每日AI产业全链路观察，从芯片到应用，从趋势到判断</p>
+      <div class="flex gap-3 text-sm">
+        <span class="px-3 py-1 rounded-full bg-indigo-900/60 text-indigo-300 border border-indigo-800">双人深度口播</span>
+        <span class="px-3 py-1 rounded-full bg-teal-900/60 text-teal-300 border border-teal-800">女主播日报</span>
+      </div>
+    </div>
+    <div class="text-6xl select-none">📡</div>
+  </div>
+</div>
+
+<!-- Filter Tabs -->
+<div class="max-w-6xl mx-auto px-4 pt-8">
+  <div class="flex gap-2 mb-8 border-b border-gray-800 pb-0">
+    <a href="/episodes" class="tab-btn {{ 'active' if current_flow == 'all' else '' }}">全部</a>
+    <a href="/episodes?flow_type=dual_host" class="tab-btn {{ 'active' if current_flow == 'dual_host' else '' }}">双人口播</a>
+    <a href="/episodes?flow_type=solo" class="tab-btn {{ 'active' if current_flow == 'solo' else '' }}">单人播报</a>
+  </div>
+
+  <!-- Stats -->
+  <p class="text-gray-500 text-sm mb-6">共 {{ total }} 期</p>
+
+  <!-- Episode Grid -->
+  {% if episodes %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
+    {% for ep in episodes %}
+    <a href="/episodes/{{ ep.id }}" class="episode-card group block bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-indigo-700 transition-all hover:shadow-lg hover:shadow-indigo-900/20">
+      <!-- Cover -->
+      <div class="aspect-square bg-gray-800 overflow-hidden">
+        <img src="{{ ep.cover_url }}" alt="{{ ep.title }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onerror="this.src='/static/cover_placeholder.svg'">
+      </div>
+      <!-- Info -->
+      <div class="p-4">
+        <div class="flex items-center gap-2 mb-2">
+          {% if ep.flow_type == 'solo' %}
+          <span class="badge-solo">单人播报</span>
+          {% else %}
+          <span class="badge-dual">双人口播</span>
+          {% endif %}
+          <span class="text-gray-500 text-xs">{{ ep.date }}</span>
+        </div>
+        <h3 class="text-white font-semibold text-sm leading-snug line-clamp-2 group-hover:text-indigo-300 transition-colors">
+          {{ ep.title or ep.id }}
+        </h3>
+        {% if ep.trends_list %}
+        <div class="mt-2 flex flex-wrap gap-1">
+          {% for trend in ep.trends_list[:2] %}
+          <span class="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded truncate max-w-[140px]">{{ trend[:20] }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="mt-3 flex items-center justify-between">
+          <span class="status-{{ ep.status }} text-xs">
+            {% if ep.status == 'published' %}✓ 已发布{% elif ep.status == 'audio_ready' or ep.status == 'pending_confirmation' %}◉ 已生成{% elif ep.status == 'draft_ready' %}○ 待 TTS{% else %}○ 草稿{% endif %}
+          </span>
+          {% if ep.xiaoyuzhou_link %}
+          <a href="{{ ep.xiaoyuzhou_link }}" target="_blank" class="text-xs text-gray-600 hover:text-indigo-400" onclick="event.stopPropagation()">小宇宙 ↗</a>
+          {% elif ep.flow_type == 'solo' and ep.status == 'draft_ready' %}
+          <button
+            class="text-xs px-2 py-1 rounded bg-teal-700 hover:bg-teal-600 text-white transition-colors tts-btn"
+            data-episode-id="{{ ep.id }}"
+            onclick="event.preventDefault(); event.stopPropagation(); synthesizeTts(this, '{{ ep.id }}')"
+          >合成TTS</button>
+          {% elif ep.flow_type == 'solo' and ep.status in ('audio_ready', 'pending_confirmation') %}
+          <button
+            class="text-xs px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors publish-btn"
+            data-episode-id="{{ ep.id }}"
+            onclick="event.preventDefault(); event.stopPropagation(); publishEpisode(this, '{{ ep.id }}')"
+          >一键发布</button>
+          {% endif %}
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- Pagination -->
+  {% if total_pages > 1 %}
+  <div class="flex justify-center gap-2 mb-12">
+    {% if page > 1 %}
+    <a href="?page={{ page-1 }}{% if current_flow != 'all' %}&flow_type={{ current_flow }}{% endif %}" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 text-sm">← 上一页</a>
+    {% endif %}
+    <span class="px-4 py-2 text-gray-500 text-sm">{{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="?page={{ page+1 }}{% if current_flow != 'all' %}&flow_type={{ current_flow }}{% endif %}" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 text-sm">下一页 →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="text-center py-20 text-gray-500">
+    <div class="text-5xl mb-4">🎙</div>
+    <p>暂无播客内容</p>
+    <p class="text-sm mt-2">前往 <a href="/admin/dashboard" class="text-indigo-400 hover:underline">管理后台</a> 生成第一期</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

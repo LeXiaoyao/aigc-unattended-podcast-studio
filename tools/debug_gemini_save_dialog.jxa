@@ -1,0 +1,84 @@
+#!/usr/bin/osascript -l JavaScript
+
+function run() {
+    const chrome = Application("com.google.Chrome");
+    chrome.activate();
+    delay(1);
+
+    let targetTab = null;
+    const windows = chrome.windows();
+    for (let i = 0; i < windows.length; i++) {
+        try {
+            const title = String(windows[i].activeTab().title());
+            if (title.includes("Gemini")) {
+                targetTab = windows[i].activeTab();
+                break;
+            }
+        } catch (e) {}
+    }
+    if (!targetTab) {
+        return "NO_GEMINI_TAB";
+    }
+
+    const helper =
+        "function __all(sel){" +
+        " var out=[],seen=[],stack=[document];" +
+        " while(stack.length){ var root=stack.pop(); if(!root||seen.indexOf(root)>=0) continue; seen.push(root);" +
+        " try{ if(root.querySelectorAll){ Array.from(root.querySelectorAll(sel)).forEach(function(el){out.push(el)});" +
+        " Array.from(root.querySelectorAll('*')).forEach(function(el){ if(el.shadowRoot) stack.push(el.shadowRoot);}); } }catch(e){} }" +
+        " return out; }" +
+        "function __label(el){ try{ return String((el.getAttribute&&(el.getAttribute('aria-label')||el.getAttribute('data-tooltip'))) || el.title || el.innerText || el.textContent || '').toLowerCase(); } catch(e){ return ''; } }";
+
+    const clickResult = targetTab.execute({
+        javascript:
+            "(function(){" + helper +
+            "var btns=__all('button,[role=\"button\"],[aria-label],[title]');" +
+            "var dl=btns.find(function(b){ var l=__label(b); return l.includes('download')||l.includes('下载')||l.includes('save image')||l.includes('save')||l.includes('保存');});" +
+            "if(dl){ dl.click(); return 'clicked:' + __label(dl);} return 'no-button';" +
+            "})()"
+    });
+
+    delay(2);
+
+    const se = Application("System Events");
+    const process = se.processes.byName("Google Chrome");
+    const out = [];
+    out.push("click=" + clickResult);
+    out.push("frontmost=" + process.frontmost());
+    const appWindows = process.windows();
+    out.push("windows=" + appWindows.length);
+
+    for (let i = 0; i < appWindows.length; i++) {
+        const w = appWindows[i];
+        out.push("window[" + i + "]=" + w.name());
+        try {
+            out.push(" sheets=" + w.sheets().length);
+            const sheets = w.sheets();
+            for (let j = 0; j < sheets.length; j++) {
+                out.push("  sheet[" + j + "] buttons=" + sheets[j].buttons().length);
+                const bs = sheets[j].buttons();
+                for (let k = 0; k < bs.length; k++) {
+                    out.push("   button=" + bs[k].name());
+                }
+            }
+        } catch (e) {
+            out.push(" sheets_err=" + e);
+        }
+        try {
+            out.push(" buttons=" + w.buttons().length);
+            const bs = w.buttons();
+            for (let k = 0; k < Math.min(bs.length, 20); k++) {
+                out.push("  win_button=" + bs[k].name());
+            }
+        } catch (e) {
+            out.push(" buttons_err=" + e);
+        }
+        try {
+            out.push(" groups=" + w.groups().length);
+        } catch (e) {
+            out.push(" groups_err=" + e);
+        }
+    }
+
+    return out.join("\n");
+}

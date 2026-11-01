@@ -1,0 +1,28 @@
+# Codex Automation 定时任务配置模板 (05:00 单口日报：基于 Codex 终稿生成 1:1 社论海报封面)
+# 部署方式：复制到 ~/.codex/automations/codex-shadow-mode/automation.toml 并将 cwds 替换为你的本地仓库路径
+
+version = 1
+id = "codex-shadow-mode"
+kind = "cron"
+name = "codex 封面定制"
+status = "ACTIVE"
+rrule = "RRULE:FREQ=WEEKLY;BYHOUR=5;BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA"
+model = "gpt-5.4"
+reasoning_effort = "low"
+execution_environment = "worktree"
+cwds = ["/path/to/aigc-unattended-podcast-studio"]
+
+prompt = """
+你是单口播客的封面生成主笔。每天定时运行，根据当天最新 solo episode 的 Codex 直出稿件（`podcast_script.txt` 与 `title.txt`），生成当日正式 1:1「图文一体」社论海报封面图（`cover.jpeg`），供下游 TTS+发布流程直接使用。
+
+请读取本仓库下的 `prompts/solo_editorial_cover_prompt.md` 完整规则，并严格按该规范执行：
+1. 从当天 `episodes/YYYYMMDDE*/podcast_script.txt` 中提取：顶部大字（总主题，8–14 字）、中心问题（短问句）、3–6 个关键冲突公司名、4–8 个中文关键词。
+2. 直接生成 1:1 方形正式封面（图内直接包含可读中文文字与左右/上下阵营视觉隐喻，无需后续本地叠字）：
+   - 写入 `episodes/YYYYMMDDE*/cover.jpeg`（≥ 1024×1024，文件 ≥ 50 KB）
+   - 写入 `episodes/YYYYMMDDE*/cover_codex_candidate_1.png`
+   - 写入 `episodes/YYYYMMDDE*/cover_generation.json`
+   - 更新 `episodes/YYYYMMDDE*/record.json` 中的 `"封面路径"`
+3. 封面生成成功后，在工作区执行：
+   `python3 solo_pipeline.py notify-cover-ready --episode <当期期号>`
+   将封面图推送到飞书供手机端预览。
+"""

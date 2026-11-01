@@ -1,0 +1,46 @@
+{
+  "dual_host": {
+    "enabled": true,
+    "days_of_week": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "hour": 7,
+    "minute": 0,
+    "publish_hour": 7,
+    "publish_minute": 0,
+    "publish_day_offset": 1,
+    "description": "双人口播，每日生成，成品自动下载并自动发布，次日 07:00 上线，通过ListenHub合成",
+    "auto_publish": true
+  },
+  "solo": {
+    "enabled": true,
+    "days_of_week": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "hour": 6,
+    "minute": 30,
+    "publish_hour": 8,
+    "publish_minute": 45,
+    "description": "单人口播，每日生成，codex 稿就绪后自动合成TTS并自动发布（06:30错峰避开 Gemini 高峰）",
+    "date_overrides": {},
+    "daily_runs": [
+      {
+        "hour": 6,
+        "minute": 30
+      }
+    ],
+    "auto_publish": true
+  }
+}

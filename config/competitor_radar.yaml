@@ -1,0 +1,105 @@
+competitors:
+  - id: vivi_podcast
+    name: Vivi Podcast
+    homepage: "https://claw.vivi.wiki/"
+    type: "website"
+    enabled: true
+
+  - id: sheng_espresso
+    name: "Sheng FM / Espresso"
+    homepage: "https://sheng-espresso.fireside.fm/"
+    type: "podcast"
+    enabled: true
+
+  - id: xiaoyuzhou_competitor
+    name: "小宇宙竞品账号"
+    homepage: "https://www.xiaoyuzhoufm.com/podcast/69561f756d2fb2759d4a512c"
+    type: "podcast"
+    enabled: true
+
+own_podcast:
+  id: own_xiaoyuzhou
+  name: "我的小宇宙播客"
+  homepage: "https://www.xiaoyuzhoufm.com/podcast/your_podcast_pid"
+  type: "podcast"
+  enabled: true
+  role: "own_podcast"
+
+lookback_hours: 48
+competitor_lookback_days: 7
+recent_episodes_lookback: 7
+
+topic_categories:
+  - AI模型
+  - AI Agent
+  - AI编程工具
+  - 开源项目
+  - 大厂产品更新
+  - 融资创业
+  - 消费电子
+  - 泛科技公司动态
+  - 开发者工具
+  - 监管政策
+  - 商业化定价
+  - 内容创作工具
+
+high_value_entities:
+  companies:
+    - OpenAI
+    - Anthropic
+    - Google
+    - Meta
+    - Microsoft
+    - Apple
+    - Nvidia
+    - Perplexity
+    - xAI
+    - ByteDance
+    - Alibaba
+    - Tencent
+    - DeepSeek
+    - Moonshot
+    - MiniMax
+    - Zhipu
+    - Baidu
+  products:
+    - ChatGPT
+    - Claude
+    - Gemini
+    - Codex
+    - Cursor
+    - Claude Code
+    - NotebookLM
+    - Sora
+    - Veo
+    - Manus
+    - Lovable
+    - Replit
+    - Windsurf
+    - Copilot
+  topics:
+    - AI agent
+    - coding agent
+    - open source model
+    - multimodal
+    - video generation
+    - voice cloning
+    - AI search
+    - AI browser
+    - AI hardware
+    - model release
+    - funding
+    - acquisition
+    - pricing
+    - subscription
+    - API
+    - developer tool
+
+thresholds:
+  topic_similarity: 0.68
+  entity_match_bonus: 0.15
+  suspicious_filtered_score: 70
+  max_supplement_topics: 8
+  max_keyword_suggestions: 20
+  max_source_suggestions: 10
+

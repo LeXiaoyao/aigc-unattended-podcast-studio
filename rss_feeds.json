@@ -1,0 +1,200 @@
+{
+  "_comment": "RSS 直订阅源配置。bucket: ai_news / product_hunt。lang: zh / en。weight 越高排序越靠前。category: aggregator(A1) / newsroom(A2)。本配置已逐源验证可达，可按需追加。",
+  "max_age_hours": 48,
+  "max_per_feed": 10,
+  "request_timeout": 20,
+  "feeds": [
+    {
+      "name": "TechCrunch AI",
+      "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 9,
+      "category": "aggregator"
+    },
+    {
+      "name": "The Verge AI",
+      "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 9,
+      "category": "aggregator"
+    },
+    {
+      "name": "Ars Technica AI",
+      "url": "https://arstechnica.com/ai/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 8,
+      "category": "aggregator"
+    },
+    {
+      "name": "MIT Technology Review AI",
+      "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 8,
+      "category": "aggregator"
+    },
+    {
+      "name": "VentureBeat",
+      "url": "https://venturebeat.com/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "aggregator"
+    },
+    {
+      "name": "Synced 机器之心",
+      "url": "https://syncedreview.com/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 9,
+      "category": "aggregator"
+    },
+    {
+      "name": "OpenAI News",
+      "url": "https://openai.com/news/rss.xml",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 10,
+      "category": "newsroom"
+    },
+    {
+      "name": "Google DeepMind Blog",
+      "url": "https://deepmind.com/blog/feed/basic/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 10,
+      "category": "newsroom"
+    },
+    {
+      "name": "Google Research Blog",
+      "url": "https://research.google/blog/rss/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 10,
+      "category": "newsroom"
+    },
+    {
+      "name": "Google The Keyword",
+      "url": "https://blog.google/rss/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "newsroom"
+    },
+    {
+      "name": "Microsoft AI News",
+      "url": "https://news.microsoft.com/source/topics/ai/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 9,
+      "category": "newsroom"
+    },
+    {
+      "name": "HuggingFace Blog",
+      "url": "https://huggingface.co/blog/feed.xml",
+      "bucket": "product_hunt",
+      "lang": "en",
+      "weight": 9,
+      "category": "newsroom"
+    },
+    {
+      "name": "WSJ Tech",
+      "url": "https://feeds.content.dowjones.io/public/rss/RSSWSJD",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 8,
+      "category": "business"
+    },
+    {
+      "name": "CNBC Tech",
+      "url": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "business"
+    },
+    {
+      "name": "The Verge",
+      "url": "https://www.theverge.com/rss/index.xml",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 6,
+      "category": "aggregator"
+    },
+    {
+      "name": "Wired",
+      "url": "https://www.wired.com/feed/rss",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 6,
+      "category": "aggregator"
+    },
+    {
+      "name": "FT Tech",
+      "url": "https://www.ft.com/technology?format=rss",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "business"
+    },
+    {
+      "name": "The Information",
+      "url": "https://www.theinformation.com/feed",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 8,
+      "category": "business"
+    },
+    {
+      "name": "Stratechery",
+      "url": "https://stratechery.com/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "analysis"
+    },
+    {
+      "name": "Politico Playbook",
+      "url": "https://rss.politico.com/playbook.xml",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 5,
+      "category": "policy"
+    },
+    {
+      "name": "Tech.eu",
+      "url": "https://tech.eu/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 6,
+      "category": "business"
+    },
+    {
+      "name": "TechCrunch All",
+      "url": "https://techcrunch.com/feed/",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 6,
+      "category": "aggregator"
+    },
+    {
+      "name": "SCMP Tech",
+      "url": "https://www.scmp.com/rss/91/feed",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "china_news"
+    },
+    {
+      "name": "SCMP China",
+      "url": "https://www.scmp.com/rss/4/feed",
+      "bucket": "ai_news",
+      "lang": "en",
+      "weight": 7,
+      "category": "china_news"
+    }
+  ]
+}

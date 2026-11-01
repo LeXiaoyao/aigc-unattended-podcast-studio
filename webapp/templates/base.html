@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AI观测站{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col">
+
+  <!-- Nav -->
+  <nav class="bg-gray-900 border-b border-gray-800 sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+      <a href="/episodes" class="flex items-center gap-2 font-bold text-lg text-white hover:text-brand-500 transition-colors">
+        <span class="text-2xl">🎙</span>
+        <span>AI观测站</span>
+      </a>
+      <div class="flex items-center gap-6 text-sm">
+        <a href="/episodes" class="text-gray-300 hover:text-white transition-colors">播客</a>
+        <a href="/episodes?flow_type=dual_host" class="text-gray-300 hover:text-white transition-colors">双人口播</a>
+        <a href="/episodes?flow_type=solo" class="text-gray-300 hover:text-white transition-colors">单人播报</a>
+        <a href="/admin/dashboard" class="text-brand-500 hover:text-brand-400 transition-colors font-medium">管理后台</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="flex-1">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-gray-900 border-t border-gray-800 mt-16">
+    <div class="max-w-6xl mx-auto px-4 py-8 text-center text-gray-500 text-sm">
+      <p>AI观测站 · 每日AI产业全链路观察</p>
+      <p class="mt-1">从芯片到应用，从趋势到判断</p>
+    </div>
+  </footer>
+
+</body>
+</html>
